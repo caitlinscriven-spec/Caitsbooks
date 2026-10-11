@@ -49,6 +49,7 @@
       <h1>Enchanted Library</h1>
       <p class="tagline">Where three stars is not an insult and five stars is a rare and magical thing</p>
     </div>
+    <p id="sync-status" class="sync-status off" role="status"></p>
     <nav class="nav" aria-label="Sections">
       <a href="#library">Library</a>
       <a href="#find">Find a book</a>
@@ -62,13 +63,14 @@
   <main id="view" class="view"></main>
 
   <footer class="foot">
-    <p>Your library lives only in this browser. Book details from <a href="https://openlibrary.org" target="_blank" rel="noopener">Open Library</a> &amp; <a href="https://www.wikidata.org" target="_blank" rel="noopener">Wikidata</a>.</p>
+    <p>Book details from <a href="https://openlibrary.org" target="_blank" rel="noopener">Open Library</a> &amp; <a href="https://www.wikidata.org" target="_blank" rel="noopener">Wikidata</a>.</p>
   </footer>
 
   <dialog id="modal" class="modal"></dialog>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <script src="js/store.js"></script>
+  <script src="js/sync.js"></script>
   <script src="js/api.js"></script>
   <script src="js/import.js"></script>
   <script src="js/charts.js"></script>

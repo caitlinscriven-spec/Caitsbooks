@@ -1,32 +1,72 @@
 /* Caitsbooks — data store, persistence & small helpers.
-   Everything lives in this browser's localStorage. Nothing is sent anywhere
-   except book look-ups to Open Library / Wikidata. */
+   The library is kept in this browser (so it works offline) and, once
+   cloud saving is connected, copied automatically to a private GitHub
+   repository after every change (see sync.js). */
 
 const STORE_KEY = 'caitsbooks.v1';
 
 const Store = {
-  data: { books: [], settings: { goal: 30, name: 'Caitlin' }, dismissed: [], recCache: null },
+  data: { books: [], settings: { goal: 30, name: 'Caitlin' }, dismissed: [], deleted: {}, recCache: null },
+  // id -> JSON of each book as last seen, used to timestamp what changed
+  snap: new Map(),
+  settingsSnap: '',
 
   load() {
     try {
       const raw = localStorage.getItem(STORE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        this.data = Object.assign(this.data, parsed);
-        this.data.settings = Object.assign({ goal: 30, name: 'Caitlin' }, parsed.settings || {});
-      }
+      if (raw) this.replace(JSON.parse(raw));
     } catch (e) {
       console.warn('Could not load library', e);
     }
     this.data.books.forEach(normaliseBook);
+    this.resnap();
   },
 
+  /** Swap in a whole library (from storage, a merge or a backup) without timestamping it. */
+  replace(data) {
+    this.data = Object.assign({ books: [], dismissed: [], deleted: {}, recCache: null }, data);
+    this.data.settings = Object.assign({ goal: 30, name: 'Caitlin' }, data.settings || {});
+    this.data.deleted = this.data.deleted || {};
+    this.data.books.forEach(normaliseBook);
+  },
+
+  resnap() {
+    this.snap = new Map(this.data.books.map(b => [b.id, bookFingerprint(b)]));
+    this.settingsSnap = JSON.stringify(this.data.settings);
+  },
+
+  /** Note what changed since last time (so devices can merge), keep a local copy, then sync. */
   save() {
+    const now = Date.now();
+    const seen = new Set();
+    for (const b of this.data.books) {
+      seen.add(b.id);
+      const fp = bookFingerprint(b);
+      if (this.snap.get(b.id) !== fp) {
+        b.updatedAt = now;
+        this.snap.set(b.id, fp);
+      }
+    }
+    for (const id of [...this.snap.keys()]) {
+      if (!seen.has(id)) {
+        this.data.deleted[id] = now;
+        this.snap.delete(id);
+      }
+    }
+    const sj = JSON.stringify(this.data.settings);
+    if (sj !== this.settingsSnap) {
+      this.data.settingsUpdatedAt = now;
+      this.settingsSnap = sj;
+    }
+    this.saveLocal();
+    if (typeof Sync !== 'undefined') Sync.schedule();
+  },
+
+  saveLocal() {
     try {
       localStorage.setItem(STORE_KEY, JSON.stringify(this.data));
     } catch (e) {
-      console.warn('Could not save library', e);
-      toast('Hmm, your browser would not let me save. Try exporting a backup.');
+      console.warn('Could not save library on this device', e);
     }
   },
 
@@ -71,6 +111,14 @@ function normaliseBook(b) {
   b.rating = typeof b.rating === 'number' ? b.rating : 0;
   b.addedAt = b.addedAt || today();
   return b;
+}
+
+/** The parts of a book only its owner changes. Looked-up details (covers,
+    subjects, series…) are left out so a background look-up never counts
+    as an edit that could outvote a real change made on another device. */
+const OWNER_FIELDS = ['title', 'authors', 'status', 'rating', 'reads', 'notes', 'pages', 'spineColour'];
+function bookFingerprint(b) {
+  return JSON.stringify(OWNER_FIELDS.map(k => b[k] ?? null));
 }
 
 function normTitle(t) {

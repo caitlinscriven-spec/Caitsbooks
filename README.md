@@ -1,6 +1,6 @@
 # Caitlin's Enchanted Library 🌹
 
-A personal, very pink, Beauty-and-the-Beast-ish book tracker. No accounts and no server. Your ratings never leave your browser.
+A personal, very pink, Beauty-and-the-Beast-ish book tracker. There's no server. Your ratings are saved automatically to a private GitHub repository that only you can see.
 
 ## What it does
 
@@ -22,11 +22,24 @@ Settings → **Import past ratings** accepts:
 
 Covers and details are then looked up in the background.
 
-## Running it
+## Cloud saving (set up once per device)
 
-It's plain HTML/CSS/JS with no build step.
+Every change saves itself to `library.json` in a **private** repository (`caitsbooks-data`). Every save is a commit, so GitHub keeps the full history and any earlier version can be restored. Each device also keeps its own copy, so the app works offline and catches up when you're back online. Changes made on different devices are merged: the newest edit to each book wins, and removed books stay removed.
 
-- **Easiest**: turn on GitHub Pages for this repo (Settings → Pages → Deploy from a branch → pick the branch, `/ (root)`). Then open the URL on your phone or laptop.
-- **Locally**: open `index.html` in a browser, or run `python3 -m http.server` in this folder and visit http://localhost:8000.
+Settings → **Turn on cloud saving** walks you through it:
 
-Your library is saved in the browser you use it in. Use **Settings → Download backup** now and then, and **Restore backup** to move it to another device.
+1. Create a private repository called `caitsbooks-data` on GitHub.
+2. Create a *fine-grained* access key limited to that one repository, with **Contents: Read and write**.
+3. Paste your username, the repository name and the key into the app.
+
+The key is stored only on that device. If it ever expires, the app shows a warning at the top of every page. Your changes stay safe on the device until you paste in a new key, and then they save.
+
+## Hosting the app
+
+The app itself contains no personal data, so it can be hosted for free with GitHub Pages:
+
+1. Make **this** repository public: Settings → General → Danger Zone → Change visibility. Your ratings live in the separate private `caitsbooks-data` repository.
+2. Settings → Pages → *Deploy from a branch* → choose the branch, folder `/ (root)` → Save.
+3. After a minute your library is at `https://<your-username>.github.io/Caitsbooks/`. Add it to your phone's home screen.
+
+To run it locally instead: `python3 -m http.server` in this folder, then visit http://localhost:8000.

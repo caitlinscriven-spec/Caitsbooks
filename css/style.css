@@ -115,6 +115,12 @@ code { background: var(--petal); padding: 0 .3em; border-radius: 4px; font-size:
   .nav a { font-size: .95rem; padding: 5px 10px; }
 }
 
+.sync-status { font-size: .8rem; margin: -4px 0 12px; color: var(--ink-soft); min-height: 1.2em; }
+.sync-status a { color: inherit; }
+.sync-status.saved { color: #3f6b45; }
+.sync-status.off, .sync-status.error { color: #a33a1f; font-weight: 600; }
+.sync-status .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--rose); animation: twinkle 1s infinite; vertical-align: middle; }
+
 /* --------------------------------------------------------------- layout */
 
 .view { max-width: 1180px; margin: 0 auto; padding: 24px 16px 40px; }
@@ -526,6 +532,14 @@ textarea { width: 100%; resize: vertical; }
 .panel label.btn { display: inline-block; margin: 6px 0; }
 .progress { height: 8px; background: var(--blush); border-radius: 999px; overflow: hidden; margin-top: 8px; }
 .progress div { height: 100%; width: 0; background: var(--rose); transition: width .3s; }
+
+.cloud-panel { margin-bottom: 16px; border-width: 2px; border-color: var(--rose); }
+.cloud-panel.connected { border-color: #a8d3a4; }
+.cloud-panel p { max-width: 70ch; }
+.steps { padding-left: 1.3em; display: grid; gap: 14px; max-width: 75ch; }
+.steps ul { margin: 6px 0 0; padding-left: 1.1em; font-size: .9rem; }
+.cloud-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 0 12px; align-items: end; margin-top: 8px; }
+.cloud-form .btn { margin: 10px 0; justify-self: start; }
 
 /* -------------------------------------------------------------- whimsy */
 

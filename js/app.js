@@ -27,6 +27,7 @@ const ui = {
 
 document.addEventListener('DOMContentLoaded', () => {
   Store.load();
+  Sync.init();
   $('#owner-name').textContent = Store.data.settings.name || 'Caitlin';
   window.addEventListener('hashchange', route);
   document.addEventListener('click', onClick);
@@ -870,6 +871,8 @@ function renderSettings(main) {
   main.innerHTML = `
     <section class="intro"><h2>Settings &amp; imports</h2></section>
 
+    ${cloudPanelHTML()}
+
     <div class="settings-grid">
       <div class="panel">
         <h3 class="section-title">Import past ratings</h3>
@@ -886,11 +889,11 @@ function renderSettings(main) {
       </div>
 
       <div class="panel">
-        <h3 class="section-title">Backups</h3>
-        <p class="small">Your library lives only in this browser. Download a backup now and then. You can also use it to move your library to another device.</p>
+        <h3 class="section-title">Extra copy</h3>
+        <p class="small">Cloud saving already keeps every version for you. If you'd also like a file of your own, download one here. You can restore from it later.</p>
         <div class="btn-row">
-          <button class="btn" id="export">Download backup</button>
-          <label class="file-btn btn ghost">Restore backup<input type="file" id="restore" accept=".json,application/json" hidden></label>
+          <button class="btn" id="export">Download a copy</button>
+          <label class="file-btn btn ghost">Restore from a copy<input type="file" id="restore" accept=".json,application/json" hidden></label>
         </div>
       </div>
 
@@ -919,6 +922,7 @@ function renderSettings(main) {
       $('#import-status').innerHTML = `<p class="danger">Couldn't read that file: ${esc(err.message)}</p>`;
     }
   };
+  wireCloudPanel(main);
   $('#export').onclick = exportBackup;
   $('#restore').onchange = async e => {
     const file = e.target.files[0];
@@ -944,6 +948,83 @@ function renderSettings(main) {
       Store.save();
       render();
     }
+  };
+}
+
+/* ------------------------------------------------------- cloud saving */
+
+function cloudPanelHTML() {
+  if (Sync.connected) {
+    const c = Sync.cfg;
+    return `<div class="panel cloud-panel connected">
+      <h3 class="section-title">Cloud saving is on</h3>
+      <p>Every change is saved automatically to your private repository
+        <a href="https://github.com/${esc(c.owner)}/${esc(c.repo)}/commits" target="_blank" rel="noopener">${esc(c.owner)}/${esc(c.repo)}</a>.
+        GitHub keeps every version, so an older copy can always be restored from its history.</p>
+      <p class="small muted">On another phone, tablet or computer, open this site and connect there with the same details. Your library appears and stays in step on every device.</p>
+      <div class="btn-row">
+        <button class="btn" id="sync-now">Save now</button>
+        <button class="btn ghost" id="sync-off">Disconnect this device</button>
+      </div>
+    </div>`;
+  }
+  return `<div class="panel cloud-panel">
+    <h3 class="section-title">Turn on cloud saving</h3>
+    <p>Right now your library lives only in this browser. Connect a private GitHub repository and every change saves automatically, keeps its full history, and appears on all your devices. You do this once per device and it takes about five minutes.</p>
+    <ol class="steps">
+      <li><strong>Make a private repository for your library.</strong>
+        <a href="https://github.com/new?name=caitsbooks-data&visibility=private" target="_blank" rel="noopener">Open GitHub's “new repository” page</a>.
+        The name <code>caitsbooks-data</code> is filled in. Make sure <em>Private</em> is selected, then press <em>Create repository</em>.</li>
+      <li><strong>Make an access key that can only touch that repository.</strong>
+        <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Open GitHub's “new fine-grained token” page</a>, then:
+        <ul>
+          <li>Token name: <code>Caitsbooks</code>. Expiration: the longest option offered.</li>
+          <li>Repository access: <em>Only select repositories</em> → choose <code>caitsbooks-data</code>.</li>
+          <li>Permissions → Repository permissions → <em>Contents</em> → <em>Read and write</em>.</li>
+          <li>Press <em>Generate token</em> and copy the key (it starts with <code>github_pat_</code>).</li>
+        </ul></li>
+      <li><strong>Paste the details here.</strong>
+        <form id="cloud-form" class="cloud-form">
+          <label>GitHub username <input id="gh-owner" autocomplete="username" required value="caitlinscriven-spec"></label>
+          <label>Repository name <input id="gh-repo" required value="caitsbooks-data"></label>
+          <label>Access key <input id="gh-token" type="password" autocomplete="off" required placeholder="github_pat_…"></label>
+          <button class="btn primary" id="gh-connect">Connect and save</button>
+        </form>
+        <div id="cloud-msg"></div></li>
+    </ol>
+    <p class="small muted">The key is kept only on this device and can only read and write that one repository. Anything already in this browser is merged with what's in the cloud, so nothing is lost.</p>
+  </div>`;
+}
+
+function wireCloudPanel(main) {
+  const form = $('#cloud-form');
+  if (form) form.onsubmit = async e => {
+    e.preventDefault();
+    const btn = $('#gh-connect');
+    btn.disabled = true;
+    btn.textContent = 'Connecting…';
+    $('#cloud-msg').innerHTML = '';
+    try {
+      await Sync.connect({
+        owner: $('#gh-owner').value.trim(),
+        repo: $('#gh-repo').value.trim(),
+        token: $('#gh-token').value.trim()
+      });
+      toast('Cloud saving is on ☁');
+      renderSettings(main);
+    } catch (err) {
+      $('#cloud-msg').innerHTML = `<p class="danger small">Couldn't connect: ${esc(err.status ? friendlyError(err) : err.message)}</p>`;
+      btn.disabled = false;
+      btn.textContent = 'Connect and save';
+    }
+  };
+  const now = $('#sync-now');
+  if (now) now.onclick = async () => { await Sync.flush(); toast(Sync.state === 'saved' ? 'Saved ✓' : 'Not saved: ' + Sync.message); };
+  const off = $('#sync-off');
+  if (off) off.onclick = () => {
+    if (!confirm('Stop cloud saving on this device? Your cloud copy stays safe on GitHub.')) return;
+    Sync.disconnect();
+    renderSettings(main);
   };
 }
 

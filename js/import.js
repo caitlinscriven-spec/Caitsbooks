@@ -161,8 +161,7 @@ function importRows(rows) {
 function importBackup(json) {
   const data = JSON.parse(json);
   if (!data || !Array.isArray(data.books)) throw new Error('That file is not a Caitsbooks backup.');
-  Store.data = Object.assign({ books: [], settings: {}, dismissed: [] }, data);
-  Store.data.books.forEach(normaliseBook);
+  Store.replace(data);
   Store.save();
   return data.books.length;
 }
