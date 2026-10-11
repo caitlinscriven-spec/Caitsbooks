@@ -19,6 +19,8 @@ const Store = {
       console.warn('Could not load library', e);
     }
     this.data.books.forEach(normaliseBook);
+    // Series guessed by the first Wikidata lookup could match films; look them up again.
+    this.data.books.forEach(b => { if (b.series && b.series.wd && !b.series.v2) { delete b.series; b.seriesChecked = false; } });
     this.resnap();
   },
 
@@ -116,7 +118,7 @@ function normaliseBook(b) {
 /** The parts of a book only its owner changes. Looked-up details (covers,
     subjects, series…) are left out so a background look-up never counts
     as an edit that could outvote a real change made on another device. */
-const OWNER_FIELDS = ['title', 'authors', 'status', 'rating', 'reads', 'notes', 'pages', 'spineColour'];
+const OWNER_FIELDS = ['title', 'authors', 'status', 'rating', 'reads', 'notes', 'pages', 'format', 'narrator'];
 function bookFingerprint(b) {
   return JSON.stringify(OWNER_FIELDS.map(k => b[k] ?? null));
 }
@@ -169,7 +171,7 @@ function currentRead(book) {
 }
 
 function startReading(book) {
-  if (!currentRead(book)) book.reads.push({ start: today(), end: null });
+  if (!currentRead(book)) book.reads.push({ start: today(), end: null, format: book.format || 'print' });
   book.status = 'reading';
   Store.save();
 }
@@ -186,7 +188,7 @@ function finishReading(book, date) {
 }
 
 function reRead(book) {
-  book.reads.push({ start: today(), end: null, reread: true });
+  book.reads.push({ start: today(), end: null, reread: true, format: book.format || 'print' });
   book.status = 'reading';
   Store.save();
 }

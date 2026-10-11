@@ -54,7 +54,8 @@ const EXTRA_COLUMNS = {
   review: ['my review', 'review', 'notes', 'comments', 'thoughts'],
   additional: ['additional authors'],
   dateAdded: ['date added', 'added'],
-  moods: ['moods']
+  moods: ['moods'],
+  format: ['format', 'binding', 'edition', 'type', 'medium']
 };
 
 function detectColumns(headers) {
@@ -122,6 +123,16 @@ function parseRating(raw) {
   return Math.min(5, Math.max(0.25, Math.round(v * 4) / 4));
 }
 
+/** "Audible Audio", "audio", "Kindle Edition", "Paperback" -> audio / ebook / print (null if unknown). */
+function formatFrom(raw) {
+  const s = String(raw || '').toLowerCase();
+  if (!s) return null;
+  if (/audio|audible|listen|narrat/.test(s)) return 'audio';
+  if (/kindle|ebook|e-book|digital|epub|nook|kobo|electronic/.test(s)) return 'ebook';
+  if (/paper|hard|print|mass market|book/.test(s)) return 'print';
+  return null;
+}
+
 function statusFrom(raw) {
   const s = String(raw || '').toLowerCase().trim();
   if (!s) return null;
@@ -145,6 +156,7 @@ function rowToBook(cells, cols, fallback = 'read') {
   if (additional && authors.length === 1) authors.push(...additional.split(/\s*,\s*/).filter(Boolean).slice(0, 2));
 
   const rating = parseRating(at('rating'));
+  const format = formatFrom(at('format'));
   const status = statusFrom(at('status')) || fallback;
 
   // Collect every finish date we can find.
@@ -171,15 +183,16 @@ function rowToBook(cells, cols, fallback = 'read') {
       while (reads.length < readCount) reads.unshift({ start: null, end: null });
       if (!reads.length) reads.push({ start: null, end: null });
     }
-    reads.forEach((rd, i) => { if (i > 0) rd.reread = true; if (status === 'dnf') rd.dnf = true; });
+    reads.forEach((rd, i) => { if (i > 0) rd.reread = true; if (status === 'dnf') rd.dnf = true; if (format) rd.format = format; });
   } else if (status === 'reading') {
-    reads = [{ start: toISODate(at('dateStarted')) || today(), end: null }];
+    reads = [{ start: toISODate(at('dateStarted')) || today(), end: null, ...(format ? { format } : {}) }];
   }
 
   return {
     title,
     authors,
     rating: status === 'want' ? 0 : rating,
+    ...(format ? { format } : {}),
     status,
     reads,
     series,
@@ -205,6 +218,7 @@ function importBooks(books) {
       if (b.reads.some(r => r.end) || !existing.reads.length || existing.reads.every(r => !r.end)) existing.reads = b.reads;
       existing.notes = existing.notes || b.notes;
       existing.series = existing.series || b.series;
+      if (b.format) existing.format = b.format;
       updated++;
     } else {
       normaliseBook(b);

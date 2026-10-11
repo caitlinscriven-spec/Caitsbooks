@@ -123,7 +123,8 @@ const Api = {
   /** Fallback: ask Wikidata which series a title belongs to and the ordering. */
   async wikidataSeries(title) {
     const q = `SELECT ?s ?sLabel ?book ?bookLabel ?ord WHERE {
-      ?item rdfs:label ${JSON.stringify(title)}@en; wdt:P179 ?s.
+      ?item rdfs:label ${JSON.stringify(title)}@en; wdt:P179 ?s; wdt:P50 [].
+      ?book wdt:P50 [].
       ?book p:P179 ?st. ?st ps:P179 ?s. OPTIONAL { ?st pq:P1545 ?ord }
       SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
     } LIMIT 80`;
@@ -136,7 +137,9 @@ const Api = {
       .map(r => ({ title: r.bookLabel.value, position: parseFloat(r.ord.value) }))
       .sort((a, b) => a.position - b.position);
     const me = books.find(b => normTitle(b.title) === normTitle(title));
-    return { name, position: me ? me.position : null, books };
+    // Some series have no English name on Wikidata; call it after its first book.
+    const label = /^Q\d+$/.test(name) ? `the ${(books[0] || { title }).title} series` : name;
+    return { name: label, position: me ? me.position : null, books };
   },
 
   async description(olKey) {
