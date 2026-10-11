@@ -118,7 +118,7 @@ function normaliseBook(b) {
 /** The parts of a book only its owner changes. Looked-up details (covers,
     subjects, series…) are left out so a background look-up never counts
     as an edit that could outvote a real change made on another device. */
-const OWNER_FIELDS = ['title', 'authors', 'status', 'rating', 'reads', 'notes', 'pages', 'format', 'narrator'];
+const OWNER_FIELDS = ['title', 'authors', 'status', 'rating', 'reads', 'notes', 'pages', 'format', 'narrator', 'coverPick'];
 function bookFingerprint(b) {
   return JSON.stringify(OWNER_FIELDS.map(k => b[k] ?? null));
 }

@@ -1,5 +1,5 @@
 /* Caitlin's Bookshop
-   Layout concept: an independent bookshop. A striped awning and shop sign up top,
+   Layout concept: an independent bookshop. A painted oxblood shop sign with gold lettering up top,
    covers displayed face-out on wooden ledges, and the owner's opinions written on
    handwritten shelf-talker cards. Warm paper, ink, deep rose, oak. */
 
@@ -10,9 +10,12 @@
   --ink: #2a1f1c;
   --ink-soft: #6b5953;
   --ink-faint: #9d8a82;
-  --rose: #b8476b;         /* the signature: deep, grown-up rose */
-  --rose-ink: #8f2f50;
-  --rose-wash: #f4dde3;
+  --rose: #a9506c;         /* the signature: a dusty, grown-up rose, used sparingly */
+  --rose-ink: #8a3552;
+  --rose-wash: #f2e1e3;
+  --fascia: #3a1c22;       /* oxblood shop sign */
+  --fascia-edge: #241014;
+  --gold: #c9a45c;
   --oak: #9a6a45;
   --oak-dark: #6b4429;
   --oak-light: #c79a6e;
@@ -41,7 +44,8 @@
   :root:not([data-theme="light"]) {
     --paper: #1d1716; --paper-deep: #2a201d; --card: #261e1c;
     --ink: #f3e8de; --ink-soft: #c9b6ab; --ink-faint: #8e7b72;
-    --rose: #e07a9a; --rose-ink: #f0a3bb; --rose-wash: #3b2129;
+    --rose: #d58aa1; --rose-ink: #e8a9bc; --rose-wash: #3b2129;
+    --fascia: #2b1418; --fascia-edge: #140a0c; --gold: #c9a45c;
     --oak: #a77650; --oak-dark: #5a3925; --oak-light: #c79a6e;
     --sage: #9db594; --sage-wash: #27301f;
     --line: #3e322d;
@@ -52,7 +56,8 @@
 :root[data-theme="dark"] {
   --paper: #1d1716; --paper-deep: #2a201d; --card: #261e1c;
   --ink: #f3e8de; --ink-soft: #c9b6ab; --ink-faint: #8e7b72;
-  --rose: #e07a9a; --rose-ink: #f0a3bb; --rose-wash: #3b2129;
+  --rose: #d58aa1; --rose-ink: #e8a9bc; --rose-wash: #3b2129;
+    --fascia: #2b1418; --fascia-edge: #140a0c; --gold: #c9a45c;
   --oak: #a77650; --oak-dark: #5a3925; --oak-light: #c79a6e;
   --sage: #9db594; --sage-wash: #27301f;
   --line: #3e322d;
@@ -91,18 +96,40 @@ code { background: var(--paper-deep); padding: 0 .3em; border-radius: 4px; font-
 /* ------------------------------------------------------------ shopfront */
 
 .shopfront { text-align: center; }
-.awning {
-  height: 46px;
-  background: repeating-linear-gradient(90deg, var(--rose) 0 34px, var(--card) 34px 68px);
-  -webkit-mask: radial-gradient(17px 12px at 17px 100%, transparent 98%, #000) -0px 0 / 34px 100%;
-          mask: radial-gradient(17px 12px at 17px 100%, transparent 98%, #000) -0px 0 / 34px 100%;
-  filter: drop-shadow(0 4px 3px rgba(42, 31, 28, .18));
+/* A traditional painted fascia: oxblood board, gold-leaf lettering, a pinstripe inset. */
+.fascia {
+  background: var(--fascia);
+  padding: 14px 16px;
+  box-shadow: inset 0 -6px 0 rgba(0, 0, 0, .18), 0 4px 0 var(--fascia-edge);
 }
-.sign { padding: 22px 16px 6px; }
-.sign h1 { font-size: var(--step-4); letter-spacing: -.01em; }
-.sign h1 .owner { color: var(--rose-ink); }
-.sign .tagline { margin: .5rem auto 0; color: var(--ink-soft); font-style: italic; font-size: var(--step--1); }
-.sign-rule { width: min(560px, 80%); margin: 14px auto 0; border: 0; border-top: 1px solid var(--ink); box-shadow: 0 3px 0 -2px var(--ink); height: 4px; opacity: .7; }
+.fascia-board {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 16px 20px 14px;
+  border: 1px solid var(--gold);
+  outline: 1px solid color-mix(in srgb, var(--gold) 45%, transparent);
+  outline-offset: 4px;
+  color: var(--gold);
+}
+.fascia h1 {
+  font-size: var(--step-4);
+  letter-spacing: .02em;
+  color: var(--gold);
+  background: linear-gradient(180deg, #f3dca2 0%, var(--gold) 55%, #9c7a37 100%);
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+  line-height: 1;
+}
+.fascia-small {
+  margin: 0;
+  font: 600 .74rem/1.6 var(--body);
+  letter-spacing: .32em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+.fascia-small:first-child { font-size: .95rem; letter-spacing: .4em; margin-bottom: 4px; }
+.shopfront > .tagline { margin: 16px auto 0; padding: 0 16px; color: var(--ink-soft); font-style: italic; font-size: var(--step--1); }
 
 .sync-status { font-size: .78rem; margin: 10px 0 0; color: var(--ink-soft); min-height: 1.2em; }
 .sync-status a { color: inherit; }
@@ -135,7 +162,7 @@ code { background: var(--paper-deep); padding: 0 .3em; border-radius: 4px; font-
   border-bottom: 2px solid transparent;
 }
 .nav a:hover { color: var(--ink); }
-.nav a.active { color: var(--ink); border-bottom-color: var(--rose); }
+.nav a.active { color: var(--ink); border-bottom-color: var(--ink); }
 
 /* --------------------------------------------------------------- layout */
 
@@ -165,8 +192,8 @@ code { background: var(--paper-deep); padding: 0 .3em; border-radius: 4px; font-
   transition: background .15s, color .15s, transform .15s;
 }
 .btn:hover { background: var(--ink); color: var(--paper); }
-.btn.primary { background: var(--rose); border-color: var(--rose); color: #fff; }
-.btn.primary:hover { background: var(--rose-ink); border-color: var(--rose-ink); }
+.btn.primary { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+.btn.primary:hover { background: var(--rose-ink); border-color: var(--rose-ink); color: #fff; }
 .btn.ghost { border-color: transparent; }
 .btn.ghost:hover { background: var(--paper-deep); color: var(--ink); }
 .btn.small { font-size: .78rem; padding: 7px 12px; }
@@ -291,7 +318,7 @@ textarea { width: 100%; resize: vertical; }
 .talker::before {
   /* the little clip holding the card to the ledge */
   content: ''; position: absolute; top: -9px; left: 50%; width: 26px; height: 14px; transform: translateX(-50%);
-  background: var(--oak-dark); border-radius: 3px 3px 1px 1px; opacity: .85;
+  background: linear-gradient(180deg, #e2c27f, var(--gold) 60%, #8e6c2c); border-radius: 2px;
 }
 .talker-label { font: 600 .62rem/1 var(--body); letter-spacing: .16em; text-transform: uppercase; color: var(--rose-ink); }
 .talker-note { display: block; font-family: var(--hand); font-size: 1.32rem; line-height: 1.15; margin: 6px 0 8px; color: var(--ink); }
@@ -410,6 +437,12 @@ span.chip { cursor: default; }
 .talker-edit textarea:focus { outline: none; }
 .narrator { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; font-size: .86rem; }
 .narrator input { flex: 1 1 200px; min-width: 0; }
+.modal-cover-col { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.cover-choices { margin-top: 18px; }
+.choice-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 12px; margin-top: 8px; }
+.choice { border: 0; padding: 0; background: none; cursor: pointer; display: flex; flex-direction: column; gap: 4px; font-size: .7rem; color: var(--ink-faint); }
+.choice img { width: 100%; aspect-ratio: 2 / 3; object-fit: cover; box-shadow: var(--cover-shadow); border-radius: 2px; transition: transform .15s; }
+.choice:hover img { transform: translateY(-3px); }
 .modal-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 18px; gap: 10px; flex-wrap: wrap; }
 .next-series {
   margin-top: 20px; padding: 12px 16px; border-radius: var(--radius);
@@ -514,4 +547,14 @@ span.chip { cursor: default; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+/* Phones: keep the sign tidy and the format switch inside its card. */
+.counter-card > div:last-child { min-width: 0; }
+.fmt-picker { max-width: 100%; }
+@media (max-width: 480px) {
+  .fascia-board { padding: 12px 10px 10px; }
+  .fascia-small { font-size: .6rem; letter-spacing: .2em; }
+  .fascia-small:first-child { font-size: .8rem; letter-spacing: .3em; }
+  .fmt-picker button { padding: 6px 8px; font-size: .74rem; gap: 4px; }
 }

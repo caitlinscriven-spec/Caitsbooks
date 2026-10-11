@@ -199,6 +199,7 @@ function rowToBook(cells, cols, fallback = 'read') {
     pages: parseInt(at('pages'), 10) || null,
     year: parseInt(at('year'), 10) || null,
     isbn: cleanIsbn(at('isbn')),
+    userIsbn: cleanIsbn(at('isbn')), // the exact edition she read, so its cover wins
     notes: at('review'),
     moods: at('moods'),
     addedAt: toISODate(at('dateAdded')) || today(),

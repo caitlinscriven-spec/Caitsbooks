@@ -26,7 +26,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('hashchange', route);
   document.addEventListener('click', onClick);
   route();
-  if (Store.books.some(b => !b.enriched && b.imported)) runEnricher();
+  if (Store.books.some(b => !b.enriched || (!b.coverV2 && b.olKey && !b.coverPick))) runEnricher();
 });
 
 function route() {
@@ -161,7 +161,8 @@ function setFormat(b, fmt) {
 
 function formatPicker(b) {
   const cur = formatOf(b);
-  return `<div class="fmt-picker" role="radiogroup" aria-label="Format">${Object.entries(FORMATS).map(([k, label]) =>
+  const short = { print: 'Print', ebook: 'Ebook', audio: 'Audio' };
+  return `<div class="fmt-picker" role="radiogroup" aria-label="Format">${Object.entries(short).map(([k, label]) =>
     `<button type="button" role="radio" aria-checked="${k === cur}" data-action="set-format" data-fmt="${k}" data-id="${b.id}">${ICONS[k]}${label}</button>`).join('')}</div>`;
 }
 
@@ -169,13 +170,32 @@ function formatBadge(b) {
   return formatOf(b) === 'audio' ? `<span class="fmt-badge" title="Audiobook">${ICONS.audio}</span>` : '';
 }
 
+/** Covers to try, best first: one she chose, her own edition's, then Open Library's English pick. */
+function coverSources(b) {
+  const out = [];
+  if (b.coverPick) out.push(coverUrl(b.coverPick));
+  if (b.userIsbn) out.push(`https://covers.openlibrary.org/b/isbn/${b.userIsbn}-M.jpg?default=false`);
+  if (b.coverId) out.push(coverUrl(b.coverId));
+  else if (b.cover) out.push(b.cover);
+  return [...new Set(out)];
+}
+
+/** An <img> that moves on to the next source if one fails or is a blank placeholder. */
+function nextCover(img) {
+  const rest = JSON.parse(img.dataset.rest || '[]');
+  if (!rest.length) { img.remove(); return; }
+  img.dataset.rest = JSON.stringify(rest.slice(1));
+  img.src = rest[0];
+}
+function checkCover(img) { if (img.naturalWidth < 10) nextCover(img); }
+
 function coverHTML(b, cls = 'cover') {
-  const src = b.cover || coverUrl(b.coverId);
+  const [src, ...rest] = coverSources(b);
   const jacket = JACKETS[hash((b.id || b.olKey || '') + b.title) % JACKETS.length];
   return `<div class="${cls} jacket" style="--j:${jacket}">
     <span class="jacket-title">${esc(b.title)}</span>
     <span class="jacket-author">${esc((b.authors || [])[0] || '')}</span>
-    ${src ? `<img src="${esc(src)}" alt="" loading="lazy" onerror="this.remove()">` : ''}
+    ${src ? `<img src="${esc(src)}" data-rest="${esc(JSON.stringify(rest))}" alt="" loading="lazy" onerror="nextCover(this)" onload="checkCover(this)">` : ''}
   </div>`;
 }
 
@@ -461,7 +481,8 @@ function openBook(id) {
     <div class="modal-inner">
       <button class="close" data-action="close-modal" aria-label="Close">✕</button>
       <div class="modal-grid">
-        <div>${coverHTML(b, 'modal-cover')}</div>
+        <div class="modal-cover-col">${coverHTML(b, 'modal-cover')}
+          ${b.olKey && !b.olKey.startsWith('series:') ? `<button class="link small" id="change-cover">Change cover</button>` : ''}</div>
         <div>
           <p class="eyebrow status-pill">${{ want: 'Up next', reading: formatOf(b) === 'audio' ? 'Listening now' : 'Reading now', read: 'Read', dnf: 'Set aside' }[b.status]}${finishedReads(b).length > 1 ? ` · read ${finishedReads(b).length}×` : ''}</p>
           <h2>${esc(b.title)}</h2>
@@ -474,6 +495,7 @@ function openBook(id) {
           <div class="btn-row">${actions}</div>
         </div>
       </div>
+      <div id="cover-choices"></div>
       <div id="next-in-series"></div>
       <div class="desc" id="desc"></div>
       ${b.subjects.length ? `<p class="tags">${b.subjects.slice(0, 8).map(s => `<span>${esc(s)}</span>`).join('')}</p>` : ''}
@@ -519,6 +541,29 @@ function openBook(id) {
     refresh();
   };
   $('#notes', m).onchange = e => { b.notes = e.target.value; Store.save(); };
+  const change = $('#change-cover', m);
+  if (change) change.onclick = async () => {
+    const box = $('#cover-choices', m);
+    box.innerHTML = loadingHTML('Finding English editions…');
+    try {
+      const covers = await Api.englishCovers(b.olKey);
+      if (m.dataset.id !== id) return;
+      box.innerHTML = covers.length ? `<div class="cover-choices">
+          <p class="small muted">Pick the edition you know. English print and ebook editions only, newest first.</p>
+          <div class="choice-grid">${covers.map(c => `<button class="choice" data-cover="${c.id}" title="${esc([c.publisher, c.year].filter(Boolean).join(', '))}">
+            <img src="${coverUrl(c.id, 'S').replace('-S.', '-M.')}" alt="" loading="lazy" onload="if (this.naturalWidth < 10) this.parentNode.remove()" onerror="this.parentNode.remove()">
+            <span>${esc(c.year)}</span></button>`).join('')}</div></div>`
+        : '<p class="small muted">Open Library has no other English covers for this book.</p>';
+      $$('.choice', box).forEach(btn => btn.onclick = () => {
+        b.coverPick = +btn.dataset.cover;
+        Store.save();
+        toast('Cover changed');
+        openBook(id);
+      });
+    } catch (e) {
+      box.innerHTML = `<p class="small muted">Couldn't reach Open Library just now. Try again in a moment.</p>`;
+    }
+  };
   const narr = $('#narrator', m);
   if (narr) narr.onchange = e => { b.narrator = e.target.value.trim(); Store.save(); };
   $('#pages', m).onchange = e => { b.pages = parseInt(e.target.value, 10) || null; Store.save(); };

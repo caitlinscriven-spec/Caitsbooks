@@ -5,7 +5,9 @@
 const OL = 'https://openlibrary.org';
 const OL_FIELDS = [
   'key', 'title', 'author_name', 'number_of_pages_median', 'cover_i', 'first_publish_year',
-  'subject', 'isbn', 'series_name', 'series_key', 'series_position', 'ratings_average', 'ratings_count'
+  'subject', 'isbn', 'series_name', 'series_key', 'series_position', 'ratings_average', 'ratings_count',
+  // the best-matching English edition, for an English cover
+  'editions', 'editions.cover_i', 'editions.language', 'editions.format', 'editions.publisher'
 ].join(',');
 
 // Subjects that say nothing about taste.
@@ -61,16 +63,27 @@ function cleanSubjects(list) {
   return out;
 }
 
+/** The cover of the English edition Open Library matched, unless it's an audiobook's. */
+function englishCover(d) {
+  const ed = d.editions && d.editions.docs && d.editions.docs[0];
+  if (!ed || !ed.cover_i) return null;
+  if (!(ed.language || []).includes('eng')) return null;
+  if (/audio/i.test((ed.format || []).join(' ')) || /librivox/i.test((ed.publisher || []).join(' '))) return null;
+  return ed.cover_i;
+}
+
 /** Turn an Open Library search doc into our book shape (not yet saved). */
 function docToBook(d) {
+  const cover = englishCover(d) || d.cover_i || null;
   const pos = d.series_position && d.series_position[0];
   return {
     olKey: d.key,
     title: d.title,
     authors: d.author_name || [],
     pages: d.number_of_pages_median || null,
-    coverId: d.cover_i || null,
-    cover: coverUrl(d.cover_i),
+    coverId: cover,
+    cover: coverUrl(cover),
+    coverV2: true,
     year: d.first_publish_year || null,
     isbn: (d.isbn || []).find(i => i.length === 13) || (d.isbn || [])[0] || null,
     subjects: cleanSubjects(d.subject),
@@ -83,13 +96,13 @@ function docToBook(d) {
 
 const Api = {
   async search(query, limit = 20) {
-    const url = `${OL}/search.json?q=${encodeURIComponent(query)}&limit=${limit}&fields=${OL_FIELDS}`;
+    const url = `${OL}/search.json?q=${encodeURIComponent(query)}&lang=en&limit=${limit}&fields=${OL_FIELDS}`;
     const data = await getJSON(url);
     return (data.docs || []).map(docToBook);
   },
 
   async searchBy({ title, author, subject, sort, limit = 20 }) {
-    const p = new URLSearchParams({ fields: OL_FIELDS, limit });
+    const p = new URLSearchParams({ fields: OL_FIELDS, limit, lang: 'en' });
     if (title) p.set('title', title);
     if (author) p.set('author', author);
     if (subject) p.set('subject', subject);
@@ -113,7 +126,7 @@ const Api = {
 
   /** Every book in an Open Library series, ordered. */
   async seriesBooks(seriesKey) {
-    const url = `${OL}/search.json?q=${encodeURIComponent('series_key:' + seriesKey)}&limit=60&fields=${OL_FIELDS}`;
+    const url = `${OL}/search.json?q=${encodeURIComponent('series_key:' + seriesKey)}&lang=en&limit=60&fields=${OL_FIELDS}`;
     const data = await getJSON(url);
     return (data.docs || []).map(docToBook)
       .filter(b => b.series && b.series.position != null)
@@ -142,6 +155,35 @@ const Api = {
     return { name: label, position: me ? me.position : null, books };
   },
 
+  /** Cover ids of a work's English print and ebook editions, for choosing a cover. */
+  async englishCovers(olKey) {
+    const data = await getJSON(`${OL}${olKey}/editions.json?limit=200`);
+    const seen = new Set();
+    const out = [];
+    for (const e of data.entries || []) {
+      const eng = (e.languages || []).some(l => l.key === '/languages/eng');
+      const audio = /audio|cd|mp3/i.test(e.physical_format || '') || /librivox/i.test((e.publishers || []).join(' '));
+      const id = (e.covers || []).find(c => c > 0);
+      if (!eng || audio || !id || seen.has(id)) continue;
+      seen.add(id);
+      out.push({ id, year: (e.publish_date || '').match(/\d{4}/)?.[0] || '', publisher: (e.publishers || [])[0] || '' });
+    }
+    // Newer editions first: they're the ones most people own.
+    return out.sort((a, b) => (b.year || '0').localeCompare(a.year || '0')).slice(0, 24);
+  },
+
+  /** Swap a stored book's cover for its English edition's, if Open Library has one. */
+  async recheckCover(book) {
+    const url = `${OL}/search.json?q=${encodeURIComponent(`key:"${book.olKey}"`)}&lang=en&limit=1&fields=key,cover_i,editions,editions.cover_i,editions.language,editions.format,editions.publisher`;
+    const d = ((await getJSON(url)).docs || [])[0];
+    const id = d && englishCover(d);
+    if (id && !book.coverPick) {
+      book.coverId = id;
+      book.cover = coverUrl(id);
+    }
+    book.coverV2 = true;
+  },
+
   async description(olKey) {
     if (!olKey) return '';
     const w = await getJSON(`${OL}${olKey}.json`);
@@ -155,10 +197,11 @@ async function enrichBook(book) {
   const found = await Api.lookup(book.title, book.authors[0], book.isbn);
   if (found) {
     book.olKey = book.olKey || found.olKey;
-    if (!book.coverId && found.coverId) {
+    if (found.coverId && (!book.coverId || !book.coverV2)) {
       book.coverId = found.coverId;
       book.cover = found.cover;
     }
+    book.coverV2 = true;
     book.pages = book.pages || found.pages;
     book.year = book.year || found.year;
     book.isbn = book.isbn || found.isbn;
@@ -182,12 +225,15 @@ const Enricher = {
     if (this.running) return;
     this.running = true;
     try {
-      const todo = Store.books.filter(b => !b.enriched);
+      // New imports need looking up; older books may need their cover swapped for an English one.
+      const todo = Store.books.filter(b => !b.enriched || (!b.coverV2 && b.olKey && !b.coverPick));
       let done = 0;
       for (const book of todo) {
         try {
-          await enrichBook(book);
+          if (!book.enriched) await enrichBook(book);
+          else await Api.recheckCover(book);
         } catch (e) {
+          book.coverV2 = true;
           console.warn('enrich failed', book.title, e);
           book.enriched = true; // don't retry forever; user can re-run from settings
         }

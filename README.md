@@ -1,6 +1,6 @@
 # Caitlin's Bookshop
 
-A personal book tracker dressed as a cosy independent bookshop: covers face-out, opinions on handwritten shelf-talkers. There's no server. Your ratings are saved automatically to a private GitHub repository that only you can see.
+A personal book tracker dressed as an independent bookshop: an oxblood-and-gold shop sign, covers face-out, opinions on handwritten shelf-talkers. There's no server. Your ratings are saved automatically to a private GitHub repository that only you can see.
 
 ## What it does
 
@@ -12,6 +12,15 @@ A personal book tracker dressed as a cosy independent bookshop: covers face-out,
 - **Next in series**: each book shows the next one in its series (Open Library, with Wikidata as a fallback), with a one-tap "add to to-read".
 - **Stats**: books, pages and average rating by month and by year, how you rate quarter-star by quarter-star, top authors, favourite themes and a yearly goal. The enchanted rose glows brighter as you get closer to your goal.
 - **Recommendations**: based on *your* scale. 3★ counts as "didn't vibe", 4★ as a genuine thumbs up, and 5★ pulls hardest. Suggestions come from three places: the next book in series you're enjoying, more from authors you love, and books matching themes you rate highly.
+
+## Covers
+
+Covers come from Open Library, which mixes editions from every language. The app picks the cover in this order:
+
+1. one you chose with **Change cover** on a book (English print and ebook editions only),
+2. the exact edition in your imported file (its ISBN),
+3. Open Library's best English print edition (audiobook covers are skipped),
+4. Open Library's general cover.
 
 ## Importing your old ratings
 
