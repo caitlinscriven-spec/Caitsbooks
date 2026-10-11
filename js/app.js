@@ -979,14 +979,14 @@ function cloudPanelHTML() {
         <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Open GitHub's “new fine-grained token” page</a>, then:
         <ul>
           <li>Token name: <code>Caitsbooks</code>. Expiration: the longest option offered.</li>
-          <li>Repository access: <em>Only select repositories</em> → choose <code>caitsbooks-data</code>.</li>
+          <li>Repository access: <em>Only select repositories</em> → choose <code>caitlinsbooklistings</code>.</li>
           <li>Permissions → Repository permissions → <em>Contents</em> → <em>Read and write</em>.</li>
           <li>Press <em>Generate token</em> and copy the key (it starts with <code>github_pat_</code>).</li>
         </ul></li>
       <li><strong>Paste the details here.</strong>
         <form id="cloud-form" class="cloud-form">
           <label>GitHub username <input id="gh-owner" autocomplete="username" required value="caitlinscriven-spec"></label>
-          <label>Repository name <input id="gh-repo" required value="caitsbooks-data"></label>
+          <label>Repository name <input id="gh-repo" required value="caitlinsbooklistings"></label>
           <label>Access key <input id="gh-token" type="password" autocomplete="off" required placeholder="github_pat_…"></label>
           <button class="btn primary" id="gh-connect">Connect and save</button>
         </form>
