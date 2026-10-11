@@ -600,13 +600,23 @@ function allFinishes() {
   return out;
 }
 
+/** Books read with no finish date (e.g. imported from long ago): one entry each, with no date. */
+function undatedReads() {
+  return Store.books
+    .filter(b => b.status === 'read' && !finishedReads(b).length)
+    .map(b => ({ book: b, end: null, undated: true, reread: false }));
+}
+
 function renderStats(main) {
   const finishes = allFinishes();
+  const undated = undatedReads();
   const years = [...new Set(finishes.map(f => f.end.slice(0, 4)))].sort();
   const thisYear = String(new Date().getFullYear());
   if (!years.includes(thisYear)) years.push(thisYear);
+  // Open on this year if anything is dated this year, otherwise on All time.
+  if (!ui.statsYearChosen && !finishes.some(f => f.end.startsWith(thisYear))) ui.statsYear = 'all';
   const sel = ui.statsYear;
-  const inPeriod = sel === 'all' ? finishes : finishes.filter(f => f.end.startsWith(sel));
+  const inPeriod = sel === 'all' ? finishes.concat(undated) : finishes.filter(f => f.end.startsWith(sel));
   const rated = inPeriod.filter(f => f.book.rating);
   const pages = inPeriod.reduce((s, f) => s + (f.book.pages || 0), 0);
   const avg = rated.length ? rated.reduce((s, f) => s + f.book.rating, 0) / rated.length : 0;
@@ -624,13 +634,17 @@ function renderStats(main) {
     </section>
 
     <div class="tiles">
-      ${tile(inPeriod.length, 'books finished', inPeriod.filter(f => f.reread).length ? `incl. ${inPeriod.filter(f => f.reread).length} re-read${inPeriod.filter(f => f.reread).length > 1 ? 's' : ''}` : '')}
+      ${tile(inPeriod.length, 'books finished', [
+        inPeriod.filter(f => f.reread).length ? `incl. ${inPeriod.filter(f => f.reread).length} re-read${inPeriod.filter(f => f.reread).length > 1 ? 's' : ''}` : '',
+        sel === 'all' && undated.length ? `${undated.length} from before you tracked dates` : ''
+      ].filter(Boolean).join(' · '))}
       ${tile(pages.toLocaleString(), 'pages turned', inPeriod.length ? `≈ ${Math.round(pages / Math.max(1, inPeriod.length))} per book` : '')}
       ${tile(avg ? avg.toFixed(2) : '—', 'average rating', avg ? starsDisplay(avg, 14) : '')}
       ${tile(fives.length, 'five-star books', inPeriod.length ? `${Math.round(fives.length / inPeriod.length * 100)}% (very exclusive)` : '')}
     </div>
 
     ${sel === thisYear && goal ? goalHTML(inPeriod.length, goal) : ''}
+    ${sel !== 'all' && !inPeriod.length ? `<p class="empty-note">No finished books with a ${sel} date yet.${undated.length ? ` Your ${undated.length} books without a finish date are under <a data-year-link="all">All time</a>.` : ''}</p>` : ''}
 
     <div class="chart-grid">
       ${sel === 'all' ? `
@@ -650,17 +664,20 @@ function renderStats(main) {
     <div class="highlights">
       ${fives.length ? `<div><h3 class="section-title">The five-star club</h3><div class="cover-row">${uniqBooks(fives).map(b => `<div data-action="open" data-id="${b.id}" title="${esc(b.title)}">${coverHTML(b, 'mini-cover')}</div>`).join('')}</div></div>` : ''}
       ${longest && longest.book.pages ? `<p class="small">Longest adventure: <a data-action="open" data-id="${longest.book.id}">${esc(longest.book.title)}</a> (${longest.book.pages} pages)</p>` : ''}
-      ${finishes.length < Store.books.filter(b => b.status === 'read').length ? `<p class="small muted">Some books have no finish date, so they're on your shelves but not in these charts. Add dates from each book's reading history.</p>` : ''}
+      ${undated.length ? `<p class="small muted">${undated.length} book${undated.length === 1 ? ' has' : 's have'} no finish date. They count in All time (shown as “Earlier” on the yearly charts) but not in any single year. You can add a date from a book's reading history.</p>` : ''}
     </div>`;
 
-  $$('.year-pills .pill', main).forEach(p => p.onclick = () => { ui.statsYear = p.dataset.year; renderStats(main); });
+  $$('.year-pills .pill', main).forEach(p => p.onclick = () => { ui.statsYear = p.dataset.year; ui.statsYearChosen = true; renderStats(main); });
+  const allLink = $('[data-year-link]', main);
+  if (allLink) allLink.onclick = () => { ui.statsYear = 'all'; ui.statsYearChosen = true; renderStats(main); };
 
   if (sel === 'all') {
-    const ys = years.length ? range(+years[0], +years[years.length - 1]) : [];
-    const per = y => inPeriod.filter(f => f.end.startsWith(y));
-    Charts.bars($('#c-years'), ys.map(y => ({ label: String(y), value: per(String(y)).length, tip: `${y}: ${per(String(y)).length} books` })), { title: 'Books per year' });
-    Charts.bars($('#c-pages'), ys.map(y => ({ label: String(y), value: per(String(y)).reduce((s, f) => s + (f.book.pages || 0), 0) })), { height: 200, format: kfmt, title: 'Pages per year' });
-    Charts.bars($('#c-avg'), ys.map(y => avgBar(String(y), per(String(y)))), { height: 200, format: v => v, title: 'Average rating per year' });
+    // Undated books get their own "Earlier" bar in front of the dated years.
+    const ys = (undated.length ? ['Earlier'] : []).concat(range(+years[0], +years[years.length - 1]).map(String));
+    const per = y => y === 'Earlier' ? undated : finishes.filter(f => f.end.startsWith(y));
+    Charts.bars($('#c-years'), ys.map(y => ({ label: y, value: per(y).length, tip: `${y === 'Earlier' ? 'No finish date' : y}: ${per(y).length} book${per(y).length === 1 ? '' : 's'}` })), { title: 'Books per year' });
+    Charts.bars($('#c-pages'), ys.map(y => ({ label: y, value: per(y).reduce((s, f) => s + (f.book.pages || 0), 0) })), { height: 200, format: kfmt, title: 'Pages per year' });
+    Charts.bars($('#c-avg'), ys.map(y => avgBar(y, per(y))), { height: 200, format: v => v, title: 'Average rating per year' });
   } else {
     const per = m => inPeriod.filter(f => +f.end.slice(5, 7) === m + 1);
     const nowM = new Date().getMonth();
@@ -686,7 +703,7 @@ function renderStats(main) {
   Charts.hbars($('#c-authors'), Object.entries(authors).sort((a, b) => b[1].n - a[1].n || b[1].sum - a[1].sum).slice(0, 8)
     .map(([a, s]) => ({ label: a, value: s.n, tip: s.rated ? `avg ${(s.sum / s.rated).toFixed(2)}★` : '' })));
 
-  const prof = tasteProfile(uniqBooks(inPeriod));
+  const prof = tasteProfile(uniqBooks(inPeriod), { recency: false });
   Charts.hbars($('#c-subjects'), prof.subjects.slice(0, 8).map(s => ({ label: s.name, value: Math.round(s.score * 100) / 100, tip: `${s.n} book${s.n > 1 ? 's' : ''}` })), { format: v => '♥'.repeat(Math.min(5, Math.max(1, Math.round(v)))) });
 }
 
@@ -719,14 +736,26 @@ function kfmt(v) { return v >= 1000 ? (v / 1000).toFixed(v >= 10000 ? 0 : 1) + '
 /** Caitlin's scale: 3★ = "didn't vibe", 4★ = genuinely good, 5★ = rare treasure. */
 function weight(r) { return r - 3.25; }
 
-function tasteProfile(books) {
+/** Taste changes. A read counts in full now, half after five years, a quarter
+    after ten; a book with no finish date is assumed to be a long-ago read. */
+const UNDATED_TASTE = 0.25;
+function freshness(b) {
+  const d = lastFinish(b);
+  if (!d) return UNDATED_TASTE;
+  const years = (Date.now() - Date.parse(d)) / (365.25 * 864e5);
+  return Math.max(0.25, Math.min(1, Math.pow(0.5, years / 5)));
+}
+
+function tasteProfile(books, { recency = true } = {}) {
   const rated = books.filter(b => b.rating);
   const authors = {}, subjects = {};
   for (const b of rated) {
-    const w = weight(b.rating);
+    const f = recency ? freshness(b) : 1;
+    const w = weight(b.rating) * f;
     for (const a of b.authors.slice(0, 2)) {
-      authors[a] = authors[a] || { name: a, score: 0, n: 0, sum: 0 };
+      authors[a] = authors[a] || { name: a, score: 0, n: 0, sum: 0, fresh: 0 };
       authors[a].score += w; authors[a].n++; authors[a].sum += b.rating;
+      authors[a].fresh = Math.max(authors[a].fresh, f);
     }
     for (const s of b.subjects) {
       const k = s.toLowerCase();
@@ -750,6 +779,7 @@ function renderRecs(main) {
     <section class="intro">
       <h2>What to read next</h2>
       <p>Picked from your own ratings. A 3★ counts as “didn't vibe” and a 4★ as a genuine thumbs up, so a 5★ pulls hardest.</p>
+      <p class="small">Taste changes, so recent reads count most. Books from years ago, or imported without a finish date, count for a quarter as much. Re-read one, or add when you read it, to give it full weight again.</p>
       <button class="btn" id="refresh-recs">↻ Shuffle the shelves</button>
     </section>
     <div id="recs">${rated.length < 3 ? `<p class="muted">Rate at least three books (or import your history in <a href="#settings">Settings</a>) and I'll start suggesting.</p>` : loadingHTML('Consulting the enchanted catalogue…')}</div>`;
@@ -757,9 +787,9 @@ function renderRecs(main) {
   if (rated.length < 3) return;
 
   const cache = Store.data.recCache;
-  if (cache && Date.now() - cache.at < 864e5 * 2) drawRecs(cache.sections);
+  if (cache && cache.v === 2 && Date.now() - cache.at < 864e5 * 2) drawRecs(cache.sections);
   else buildRecs().then(sections => {
-    Store.data.recCache = { at: Date.now(), sections };
+    Store.data.recCache = { v: 2, at: Date.now(), sections };
     Store.save();
     if (ui.view === 'recs') drawRecs(sections);
   }).catch(err => {
@@ -800,9 +830,14 @@ async function buildRecs() {
   }
   const seriesRecs = [];
   const groups = Object.values(seriesGroups)
-    .map(list => ({ list, avg: list.filter(b => b.rating).reduce((s, b) => s + b.rating, 0) / Math.max(1, list.filter(b => b.rating).length) }))
-    .filter(g => g.avg >= 3.5)
-    .sort((a, b) => b.avg - a.avg)
+    .map(list => ({
+      list,
+      avg: list.filter(b => b.rating).reduce((s, b) => s + b.rating, 0) / Math.max(1, list.filter(b => b.rating).length),
+      fresh: Math.max(...list.map(freshness))
+    }))
+    // Only series you've read in roughly the last five years; childhood series stay put.
+    .filter(g => g.avg >= 3.5 && g.fresh >= 0.5)
+    .sort((a, b) => b.avg * b.fresh - a.avg * a.fresh)
     .slice(0, 8);
   await Promise.all(groups.map(async g => {
     const furthest = g.list.slice().sort((a, b) => (b.series.position || 0) - (a.series.position || 0))[0];
@@ -815,14 +850,14 @@ async function buildRecs() {
   }));
 
   // 2. More from authors you adore
-  const loved = prof.authors.filter(a => a.sum / a.n >= 3.75).slice(0, 5);
+  const loved = prof.authors.filter(a => a.sum / a.n >= 3.75 && a.score >= 0.5).slice(0, 5);
   const authorRecs = [];
   await Promise.all(loved.map(async a => {
     try {
       const res = await Api.searchBy({ author: a.name, sort: 'rating', limit: 20 });
       res.filter(c => c.authors[0] === a.name || normName(c.authors[0]) === normName(a.name))
         .filter(c => keep(c)).slice(0, 3)
-        .forEach(c => authorRecs.push({ ...c, why: `You average ${fmtRating(Math.round(a.sum / a.n * 4) / 4)}★ for ${a.name}` }));
+        .forEach(c => authorRecs.push({ ...c, why: `You average ${fmtRating(Math.round(a.sum / a.n * 4) / 4)}★ for ${a.name}${a.fresh < 0.5 ? ' (mostly a while ago)' : ''}` }));
     } catch (e) { /* skip */ }
   }));
 

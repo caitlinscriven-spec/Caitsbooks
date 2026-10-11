@@ -490,6 +490,9 @@ textarea { width: 100%; resize: vertical; }
 .goal-track { height: 16px; border-radius: 999px; background: var(--blush); margin-top: 8px; overflow: hidden; }
 .goal-fill { height: 100%; background: linear-gradient(90deg, #f3b5c8, var(--rose-deep)); border-radius: 999px; text-align: right; color: #fff; font-size: 11px; line-height: 16px; padding-right: 4px; min-width: 20px; transition: width 1s; }
 
+.empty-note { background: var(--card); border: 1px dashed var(--rose); border-radius: var(--radius); padding: 10px 16px; margin: 0 0 16px; }
+.empty-note a { cursor: pointer; }
+
 .chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .chart-card { margin: 0; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px 10px; box-shadow: var(--shadow); min-width: 0; }
 .chart-card.wide { grid-column: 1 / -1; }
