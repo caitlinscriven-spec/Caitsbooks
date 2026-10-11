@@ -533,6 +533,18 @@ textarea { width: 100%; resize: vertical; }
 .progress { height: 8px; background: var(--blush); border-radius: 999px; overflow: hidden; margin-top: 8px; }
 .progress div { height: 100%; width: 0; background: var(--rose); transition: width .3s; }
 
+.import-panel { margin-bottom: 16px; border: 2px solid var(--gold); }
+.map-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 0 12px; }
+.map-grid select { width: 100%; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { background: var(--blush); border: 1px solid var(--line); border-radius: 999px; padding: 2px 12px; font-size: .85rem; }
+.chip.read { background: #dcefd9; border-color: #a8d3a4; color: #2f5a34; font-weight: 600; }
+.table-wrap { overflow-x: auto; }
+.preview-table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+.preview-table th { text-align: left; font-family: var(--serif); color: var(--wine); border-bottom: 1px solid var(--line); padding: 4px 8px; }
+.preview-table td { padding: 5px 8px; border-bottom: 1px dashed var(--line); white-space: nowrap; }
+.preview-table td:first-child { white-space: normal; min-width: 10em; }
+
 .cloud-panel { margin-bottom: 16px; border-width: 2px; border-color: var(--rose); }
 .cloud-panel.connected { border-color: #a8d3a4; }
 .cloud-panel p { max-width: 70ch; }

@@ -2,10 +2,15 @@
    Understands Goodreads exports, StoryGraph exports, a simple
    "Title, Author, Rating, Date Read" CSV, and Caitsbooks JSON backups. */
 
-function parseCSV(text) {
+/** Read CSV (or semicolon/tab separated) text into { headers, rows }. */
+function parseTable(text) {
+  text = text.replace(/^﻿/, '');
+  const firstLine = text.split(/\r?\n/, 1)[0] || '';
+  const count = ch => firstLine.split(ch).length - 1;
+  const delim = [',', ';', '\t'].sort((a, b) => count(b) - count(a))[0];
+
   const rows = [];
   let row = [], field = '', inQuotes = false;
-  text = text.replace(/^﻿/, '');
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
     if (inQuotes) {
@@ -13,19 +18,60 @@ function parseCSV(text) {
         if (text[i + 1] === '"') { field += '"'; i++; } else inQuotes = false;
       } else field += c;
     } else if (c === '"') inQuotes = true;
-    else if (c === ',') { row.push(field); field = ''; }
+    else if (c === delim) { row.push(field); field = ''; }
     else if (c === '\n' || c === '\r') {
       if (c === '\r' && text[i + 1] === '\n') i++;
       row.push(field); field = '';
-      if (row.some(f => f !== '')) rows.push(row);
+      if (row.some(f => f.trim() !== '')) rows.push(row);
       row = [];
     } else field += c;
   }
   row.push(field);
-  if (row.some(f => f !== '')) rows.push(row);
-  if (!rows.length) return [];
-  const header = rows[0].map(h => h.trim().toLowerCase());
-  return rows.slice(1).map(r => Object.fromEntries(header.map((h, i) => [h, (r[i] || '').trim()])));
+  if (row.some(f => f.trim() !== '')) rows.push(row);
+
+  // The header is whichever of the first few rows looks most like column names.
+  const looksLikeHeader = r => r.filter(c => Object.values(COLUMN_ROLES).some(sp => sp.like.test(c.toLowerCase().trim()))).length;
+  let h = 0;
+  rows.slice(0, 10).forEach((r, i) => { if (looksLikeHeader(r) > looksLikeHeader(rows[h])) h = i; });
+  return { headers: (rows[h] || []).map(c => c.trim()), rows: rows.slice(h + 1).map(r => r.map(c => c.trim())) };
+}
+
+/** Work out which column holds what. Each entry is a column index, or -1. */
+const COLUMN_ROLES = {
+  title: { label: 'Title', exact: ['title', 'book title'], like: /title|book|name/, not: /author|series|publisher|shelf/ },
+  author: { label: 'Author', exact: ['author', 'authors', 'author name'], like: /author|writer|by/, not: /l-f|additional/ },
+  rating: { label: 'My rating', exact: ['my rating', 'star rating', 'rating', 'stars', 'my stars'], like: /rating|stars?|score|rated/, not: /average|avg|count|goodreads/ },
+  status: { label: 'Read or not', exact: ['exclusive shelf', 'read status', 'status', 'shelf'], like: /status|shelf|read\?|have read|finished\?|done\?/, not: /bookshelves/ },
+  dateRead: { label: 'Date finished', exact: ['date read', 'last date read', 'date finished', 'finished', 'read date', 'date completed'], like: /date.*(read|finish|complet|end)|finished|completed|read on|when/, not: /start|added|dates read/ }
+};
+const EXTRA_COLUMNS = {
+  datesRead: ['dates read'],
+  dateStarted: ['date started', 'started', 'start date'],
+  readCount: ['read count', 'times read'],
+  pages: ['number of pages', 'pages', 'page count', 'length'],
+  year: ['original publication year', 'year published', 'year', 'published'],
+  isbn: ['isbn13', 'isbn/uid', 'isbn'],
+  review: ['my review', 'review', 'notes', 'comments', 'thoughts'],
+  additional: ['additional authors'],
+  dateAdded: ['date added', 'added'],
+  moods: ['moods']
+};
+
+function detectColumns(headers) {
+  const low = headers.map(h => h.toLowerCase().trim());
+  const cols = {};
+  for (const [role, spec] of Object.entries(COLUMN_ROLES)) {
+    let i = -1;
+    for (const e of spec.exact) { i = low.indexOf(e); if (i >= 0) break; }
+    if (i < 0) i = low.findIndex(h => spec.like.test(h) && !spec.not.test(h));
+    cols[role] = i;
+  }
+  for (const [role, names] of Object.entries(EXTRA_COLUMNS)) {
+    let i = -1;
+    for (const e of names) { i = low.indexOf(e); if (i >= 0) break; }
+    cols[role] = i;
+  }
+  return cols;
 }
 
 /** "2023/05/14", "2023-05-14", "14/05/2023" -> "2023-05-14" */
@@ -52,42 +98,58 @@ function splitSeriesFromTitle(title) {
   return { title: m[1].trim(), series: { name: m[2].trim(), key: null, position: parseFloat(m[3]) } };
 }
 
-function quarter(n) {
-  const v = parseFloat(n);
+/** "4", "4.5", "3¾", "★★★★½", "8/10", "4 out of 5", "4 stars" -> quarter stars (0 = none). */
+function parseRating(raw) {
+  let s = String(raw || '').trim();
+  if (!s) return 0;
+  const glyph = { '¼': 0.25, '½': 0.5, '¾': 0.75 };
+  let v;
+  const stars = (s.match(/[★⭐]/g) || []).length;
+  if (stars) {
+    v = stars + (glyph[(s.match(/[¼½¾]/) || [])[0]] || 0);
+  } else {
+    const out = s.match(/(\d+(?:[.,]\d+)?)\s*(?:\/|out of)\s*(\d+)/i);
+    if (out) {
+      v = parseFloat(out[1].replace(',', '.')) / parseFloat(out[2]) * 5;
+    } else {
+      const m = s.match(/(\d+(?:[.,]\d+)?)\s*([¼½¾])?/);
+      if (!m) return 0;
+      v = parseFloat(m[1].replace(',', '.')) + (glyph[m[2]] || 0);
+      if (v > 5 && v <= 10) v = v / 2; // a 10-point scale
+    }
+  }
   if (!v || isNaN(v)) return 0;
-  return Math.min(5, Math.max(0, Math.round(v * 4) / 4));
+  return Math.min(5, Math.max(0.25, Math.round(v * 4) / 4));
 }
 
-function statusFrom(s) {
-  s = (s || '').toLowerCase();
-  if (s.includes('current')) return 'reading';
-  if (s.includes('did-not') || s.includes('dnf') || s.includes('abandon')) return 'dnf';
-  if (s.includes('to-read') || s.includes('to read') || s.includes('want')) return 'want';
-  if (s.includes('read')) return 'read';
+function statusFrom(raw) {
+  const s = String(raw || '').toLowerCase().trim();
+  if (!s) return null;
+  if (/did.?not|dnf|abandon|gave up|stopped/.test(s)) return 'dnf';
+  if (/to.?read|tbr|want|wish|unread|not read|not started|^no$|^n$|plan/.test(s)) return 'want';
+  if (/current|in progress|^reading$|reading now|started/.test(s)) return 'reading';
+  if (/read|finish|complet|done|^yes$|^y$|✓|✔|^x$|^true$/.test(s)) return 'read';
   return null;
 }
 
-function rowToBook(r) {
-  const get = (...keys) => {
-    for (const k of keys) if (r[k] != null && r[k] !== '') return r[k];
-    return '';
-  };
-  const rawTitle = get('title', 'book title', 'name');
+/** Turn one spreadsheet row into a book. Rows with no recognisable status use `fallback`. */
+function rowToBook(cells, cols, fallback = 'read') {
+  const at = role => (cols[role] >= 0 ? (cells[cols[role]] || '').trim() : '');
+  const rawTitle = at('title');
   if (!rawTitle) return null;
   const { title, series } = splitSeriesFromTitle(rawTitle);
 
-  const authorStr = get('author', 'authors', 'author name');
-  const authors = authorStr.split(/\s*,\s*(?=[A-Z])|\s*;\s*|\s+&\s+/).filter(Boolean).slice(0, 4);
-  const additional = get('additional authors');
+  const authors = at('author').split(/\s*,\s*(?=[A-Z])|\s*;\s*|\s+&\s+/).filter(Boolean).slice(0, 4);
   // Goodreads keeps co-authors separately; StoryGraph uses a comma list already.
+  const additional = at('additional');
   if (additional && authors.length === 1) authors.push(...additional.split(/\s*,\s*/).filter(Boolean).slice(0, 2));
 
-  const rating = quarter(get('my rating', 'star rating', 'rating', 'stars'));
-  let status = statusFrom(get('exclusive shelf', 'read status', 'status', 'shelf'));
+  const rating = parseRating(at('rating'));
+  const status = statusFrom(at('status')) || fallback;
 
   // Collect every finish date we can find.
   const ends = [];
-  const datesRead = get('dates read');
+  const datesRead = at('datesRead');
   if (datesRead) {
     // StoryGraph: "2023/01/02-2023/01/15, 2024/03/01-2024/03/09"
     datesRead.split(/,\s*/).forEach(part => {
@@ -96,12 +158,10 @@ function rowToBook(r) {
     });
   }
   if (!ends.length) {
-    const end = toISODate(get('date read', 'last date read', 'date finished', 'finished', 'read date'));
-    const start = toISODate(get('date started', 'started'));
-    if (end) ends.push({ start, end });
+    const end = toISODate(at('dateRead'));
+    if (end) ends.push({ start: toISODate(at('dateStarted')), end });
   }
-  const readCount = parseInt(get('read count'), 10) || 0;
-  if (!status) status = ends.length || rating ? 'read' : 'want';
+  const readCount = parseInt(at('readCount'), 10) || 0;
 
   let reads = [];
   if (status === 'read' || status === 'dnf') {
@@ -113,7 +173,7 @@ function rowToBook(r) {
     }
     reads.forEach((rd, i) => { if (i > 0) rd.reread = true; if (status === 'dnf') rd.dnf = true; });
   } else if (status === 'reading') {
-    reads = [{ start: toISODate(get('date started')) || today(), end: null }];
+    reads = [{ start: toISODate(at('dateStarted')) || today(), end: null }];
   }
 
   return {
@@ -123,28 +183,26 @@ function rowToBook(r) {
     status,
     reads,
     series,
-    pages: parseInt(get('number of pages', 'pages', 'page count'), 10) || null,
-    year: parseInt(get('original publication year', 'year published', 'year'), 10) || null,
-    isbn: cleanIsbn(get('isbn13', 'isbn/uid', 'isbn')),
-    notes: get('my review', 'review', 'notes'),
-    moods: get('moods'),
-    addedAt: toISODate(get('date added')) || today(),
+    pages: parseInt(at('pages'), 10) || null,
+    year: parseInt(at('year'), 10) || null,
+    isbn: cleanIsbn(at('isbn')),
+    notes: at('review'),
+    moods: at('moods'),
+    addedAt: toISODate(at('dateAdded')) || today(),
     subjects: [],
     imported: true
   };
 }
 
-/** Returns { added, updated, skipped } */
-function importRows(rows) {
-  let added = 0, updated = 0, skipped = 0;
-  for (const r of rows) {
-    const b = rowToBook(r);
-    if (!b) { skipped++; continue; }
+/** Add parsed books, updating any already in the library. Returns { added, updated }. */
+function importBooks(books) {
+  let added = 0, updated = 0;
+  for (const b of books) {
     const existing = Store.findMatch(b);
     if (existing) {
       if (b.rating) existing.rating = b.rating;
       if (b.status !== 'want' || existing.status === 'want') existing.status = b.status;
-      if (b.reads.some(r => r.end) || !existing.reads.length) existing.reads = b.reads;
+      if (b.reads.some(r => r.end) || !existing.reads.length || existing.reads.every(r => !r.end)) existing.reads = b.reads;
       existing.notes = existing.notes || b.notes;
       existing.series = existing.series || b.series;
       updated++;
@@ -155,7 +213,7 @@ function importRows(rows) {
     }
   }
   Store.save();
-  return { added, updated, skipped };
+  return { added, updated };
 }
 
 function importBackup(json) {

@@ -873,6 +873,8 @@ function renderSettings(main) {
 
     ${cloudPanelHTML()}
 
+    <div id="import-preview"></div>
+
     <div class="settings-grid">
       <div class="panel">
         <h3 class="section-title">Import past ratings</h3>
@@ -911,13 +913,12 @@ function renderSettings(main) {
   $('#set-goal').onchange = e => { s.goal = parseInt(e.target.value, 10) || 0; Store.save(); renderGoalRose(); };
   $('#csv').onchange = async e => {
     const file = e.target.files[0];
+    e.target.value = '';
     if (!file) return;
     try {
-      const rows = parseCSV(await file.text());
-      const res = importRows(rows);
-      $('#import-status').innerHTML = `<p class="ok">✿ Imported ${res.added} new book${res.added === 1 ? '' : 's'}${res.updated ? `, updated ${res.updated}` : ''}. Now fetching covers in the background…</p><div class="progress"><div id="enrich-bar"></div></div><p class="small muted" id="enrich-text"></p>`;
-      Store.data.recCache = null;
-      runEnricher();
+      const table = parseTable(await file.text());
+      if (!table.rows.length) throw new Error('it looks empty.');
+      showImportPreview(table, file.name);
     } catch (err) {
       $('#import-status').innerHTML = `<p class="danger">Couldn't read that file: ${esc(err.message)}</p>`;
     }
@@ -951,6 +952,76 @@ function renderSettings(main) {
   };
 }
 
+/* --------------------------------------------------------- import preview */
+
+const STATUS_WORDS = { read: 'Read', reading: 'Reading', want: 'To read', dnf: 'Set aside' };
+
+function showImportPreview(table, fileName) {
+  const box = $('#import-preview');
+  const cols = detectColumns(table.headers);
+  let fallback = 'read';
+
+  const options = sel => `<option value="-1">(not in this file)</option>` +
+    table.headers.map((h, i) => `<option value="${i}" ${i === sel ? 'selected' : ''}>${esc(h || `Column ${i + 1}`)}</option>`).join('');
+
+  const draw = () => {
+    const books = table.rows.map(r => rowToBook(r, cols, fallback)).filter(Boolean);
+    const count = st => books.filter(b => b.status === st).length;
+    const rated = books.filter(b => b.rating).length;
+    const dated = books.filter(b => b.reads.some(r => r.end)).length;
+    const already = books.filter(b => Store.findMatch(b)).length;
+    box.innerHTML = `<div class="panel import-panel">
+      <h3 class="section-title">Check your import</h3>
+      <p>I found <strong>${books.length} books</strong> in <em>${esc(fileName)}</em>. Check the columns and the example rows below, then import.</p>
+      <div class="map-grid">
+        ${Object.entries(COLUMN_ROLES).map(([role, spec]) => `
+          <label>${spec.label}<select data-role="${role}">${options(cols[role])}</select></label>`).join('')}
+        <label>Books with no status count as
+          <select id="fallback">
+            <option value="read" ${fallback === 'read' ? 'selected' : ''}>Read</option>
+            <option value="want" ${fallback === 'want' ? 'selected' : ''}>To read</option>
+          </select></label>
+      </div>
+      <p class="chips">
+        <span class="chip read">${count('read')} read</span>
+        <span class="chip">${count('reading')} reading</span>
+        <span class="chip">${count('want')} to read</span>
+        ${count('dnf') ? `<span class="chip">${count('dnf')} set aside</span>` : ''}
+        <span class="chip">${rated} with a rating</span>
+        <span class="chip">${dated} with a finish date</span>
+      </p>
+      ${cols.title < 0 ? '<p class="danger small">Pick which column holds the book titles.</p>' : ''}
+      <div class="table-wrap"><table class="preview-table">
+        <thead><tr><th>Title</th><th>Author</th><th>Status</th><th>Rating</th><th>Finished</th></tr></thead>
+        <tbody>${books.slice(0, 6).map(b => `<tr>
+          <td>${esc(b.title)}</td><td>${esc(b.authors[0] || '')}</td>
+          <td>${STATUS_WORDS[b.status]}</td>
+          <td>${b.rating ? starsDisplay(b.rating, 13) + ' ' + fmtRating(b.rating) : '—'}</td>
+          <td>${esc((b.reads.find(r => r.end) || {}).end || '—')}</td></tr>`).join('')}</tbody>
+      </table></div>
+      ${already ? `<p class="small">${already} of these are already in your library. They'll be updated to match this file, which also fixes books an earlier import put on your to-read pile by mistake.</p>` : ''}
+      <div class="btn-row">
+        <button class="btn primary" id="do-import" ${books.length && cols.title >= 0 ? '' : 'disabled'}>Import ${books.length} books</button>
+        <button class="btn ghost" id="cancel-import">Cancel</button>
+      </div>
+    </div>`;
+
+    $$('select[data-role]', box).forEach(sel => sel.onchange = () => { cols[sel.dataset.role] = +sel.value; draw(); });
+    $('#fallback', box).onchange = e => { fallback = e.target.value; draw(); };
+    $('#cancel-import', box).onclick = () => { box.innerHTML = ''; };
+    $('#do-import', box).onclick = () => {
+      const res = importBooks(books);
+      box.innerHTML = '';
+      $('#import-status').innerHTML = `<p class="ok">✿ Imported ${res.added} new book${res.added === 1 ? '' : 's'}${res.updated ? ` and updated ${res.updated}` : ''}. Covers are being fetched in the background…</p><div class="progress"><div id="enrich-bar"></div></div><p class="small muted" id="enrich-text"></p>`;
+      Store.data.recCache = null;
+      runEnricher();
+      $('#import-status').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    };
+  };
+  draw();
+  box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 /* ------------------------------------------------------- cloud saving */
 
 function cloudPanelHTML() {
@@ -973,8 +1044,8 @@ function cloudPanelHTML() {
     <p>Right now your library lives only in this browser. Connect a private GitHub repository and every change saves automatically, keeps its full history, and appears on all your devices. You do this once per device and it takes about five minutes.</p>
     <ol class="steps">
       <li><strong>Make a private repository for your library.</strong>
-        <a href="https://github.com/new?name=caitsbooks-data&visibility=private" target="_blank" rel="noopener">Open GitHub's “new repository” page</a>.
-        The name <code>caitsbooks-data</code> is filled in. Make sure <em>Private</em> is selected, then press <em>Create repository</em>.</li>
+        <a href="https://github.com/new?name=caitlinsbooklistings&visibility=private" target="_blank" rel="noopener">Open GitHub's “new repository” page</a>.
+        Make sure <em>Private</em> is selected, then press <em>Create repository</em>. Already made one (like <code>caitlinsbooklistings</code>)? Skip to step 2.</li>
       <li><strong>Make an access key that can only touch that repository.</strong>
         <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Open GitHub's “new fine-grained token” page</a>, then:
         <ul>
