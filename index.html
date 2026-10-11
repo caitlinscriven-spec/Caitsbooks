@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Caitlin's Enchanted Library</title>
+  <meta name="theme-color" content="#f7d6e0">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌹</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500&family=Great+Vibes&family=Lora:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="masthead">
+    <div class="rose-jar" id="rose" title="Your enchanted rose glows brighter as you near your yearly goal">
+      <svg viewBox="0 0 80 110" aria-hidden="true">
+        <defs>
+          <radialGradient id="glow" cx="50%" cy="40%" r="50%">
+            <stop offset="0%" stop-color="#ffd1e0" stop-opacity=".95"/>
+            <stop offset="100%" stop-color="#ffd1e0" stop-opacity="0"/>
+          </radialGradient>
+          <linearGradient id="glass" x1="0" x2="1">
+            <stop offset="0" stop-color="#fff" stop-opacity=".55"/>
+            <stop offset=".3" stop-color="#fff" stop-opacity=".08"/>
+            <stop offset="1" stop-color="#fff" stop-opacity=".3"/>
+          </linearGradient>
+        </defs>
+        <circle class="rose-glow" cx="40" cy="44" r="34" fill="url(#glow)"/>
+        <path d="M40 74 C39 62 41 55 40 46" stroke="#4d7a4a" stroke-width="2.4" fill="none"/>
+        <path d="M40 63 c-7-1-11-5-12-9 6 0 10 3 12 9z" fill="#5d8f58"/>
+        <path d="M40 58 c6-1 10-5 11-9-6 0-9 3-11 9z" fill="#5d8f58"/>
+        <g class="rose-bloom">
+          <path d="M29 38c0-9 6-14 11-14s11 5 11 14c0 6-5 10-11 10s-11-4-11-10z" fill="#c2185b"/>
+          <path d="M33 36c0-6 3-9 7-9s7 3 7 9c-2-3-4-4-7-4s-5 1-7 4z" fill="#e0457b"/>
+          <path d="M36 33c1-3 2-4 4-4s3 1 4 4c-1-1-2-1-4-1s-3 0-4 1z" fill="#f48fb1"/>
+          <path d="M29 38c3 4 6 6 11 6s8-2 11-6c-1 7-5 10-11 10s-10-3-11-10z" fill="#ad1457"/>
+        </g>
+        <path class="fallen" d="M50 84c2-2 5-2 6 0-2 2-5 2-6 0z" fill="#e0457b"/>
+        <path d="M14 86 V36 C14 12 66 12 66 36 V86 Z" fill="url(#glass)" stroke="#fff" stroke-opacity=".8" stroke-width="1.5"/>
+        <rect x="8" y="86" width="64" height="8" rx="3" fill="#8a5a3c"/>
+        <rect x="12" y="94" width="56" height="7" rx="2" fill="#6b4029"/>
+        <circle cx="40" cy="12" r="3" fill="#d4a24c"/>
+      </svg>
+      <span id="rose-count" class="rose-count"></span>
+    </div>
+    <div class="title-block">
+      <p class="script"><span id="owner-name">Caitlin</span>'s</p>
+      <h1>Enchanted Library</h1>
+      <p class="tagline">Where three stars is not an insult and five stars is a rare and magical thing</p>
+    </div>
+    <nav class="nav" aria-label="Sections">
+      <a href="#library">Library</a>
+      <a href="#find">Find a book</a>
+      <a href="#tbr">To read</a>
+      <a href="#stats">Stats</a>
+      <a href="#recs">Recommendations</a>
+      <a href="#settings">Settings</a>
+    </nav>
+  </header>
+
+  <main id="view" class="view"></main>
+
+  <footer class="foot">
+    <p>Your library lives only in this browser. Book details from <a href="https://openlibrary.org" target="_blank" rel="noopener">Open Library</a> &amp; <a href="https://www.wikidata.org" target="_blank" rel="noopener">Wikidata</a>.</p>
+  </footer>
+
+  <dialog id="modal" class="modal"></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="js/store.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/import.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
