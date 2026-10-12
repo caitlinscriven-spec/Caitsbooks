@@ -188,6 +188,10 @@ function mergeLibraries(local, remote) {
     for (const [k, v] of Object.entries(lose)) {
       if (!OWNER_FIELDS.includes(k) && (merged[k] == null || (Array.isArray(merged[k]) && !merged[k].length))) merged[k] = v;
     }
+    // Covers follow whichever device looked them up most recently, whoever edited the book last.
+    if ((lose.coverAt || 0) > (merged.coverAt || 0)) {
+      for (const k of ['coverId', 'cover', 'coverV', 'coverAt']) if (k in lose) merged[k] = lose[k];
+    }
     byId.set(b.id, merged);
   }
   const books = [...byId.values()]

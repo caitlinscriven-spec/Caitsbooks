@@ -26,7 +26,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('hashchange', route);
   document.addEventListener('click', onClick);
   route();
-  if (Store.books.some(b => !b.enriched || (!b.coverV2 && b.olKey && !b.coverPick))) runEnricher();
+  if (Store.books.some(needsLookup)) runEnricher();
 });
 
 function route() {
@@ -999,9 +999,11 @@ function renderSettings(main) {
 
       <div class="panel">
         <h3 class="section-title">Housekeeping</h3>
-        <p class="small">${Store.books.length} books in total. ${unenriched ? `${unenriched} still need covers and details.` : 'All books have been looked up.'}</p>
+        <p class="small">${Store.books.length} books in total. ${unenriched ? `${unenriched} still need covers and details.` : 'All books have been looked up.'}
+          “Refresh all covers” looks every book up again and switches it to an English edition's cover. Covers you picked yourself stay as they are.</p>
+        <div class="progress"><div id="enrich-bar"></div></div><p class="small muted" id="enrich-text"></p>
         <div class="btn-row">
-          <button class="btn" id="re-enrich">Look up missing covers again</button>
+          <button class="btn" id="re-enrich">Refresh all covers</button>
           <button class="btn ghost danger" id="wipe">Erase everything</button>
         </div>
       </div>
@@ -1034,11 +1036,15 @@ function renderSettings(main) {
     } catch (err) { toast(err.message); }
   };
   $('#re-enrich').onclick = () => {
-    Store.books.forEach(b => { if (!b.cover || !b.pages) b.enriched = false; });
+    Store.books.forEach(b => {
+      b.lookupTries = 0;
+      if (!b.olKey || !b.coverId) b.enriched = false; // never matched: search again from scratch
+      if (!b.coverPick) b.coverV = 0;
+    });
     Store.save();
-    runEnricher();
     renderSettings(main);
-    toast('Looking up covers…');
+    runEnricher();
+    toast('Refreshing covers. This takes a few minutes for a big library.');
   };
   $('#wipe').onclick = () => {
     if (confirm('Erase your entire library? Download a backup first if you might want it back.') && confirm('Really erase everything?')) {
@@ -1199,10 +1205,11 @@ function wireCloudPanel(main) {
 }
 
 function runEnricher() {
-  Enricher.run((done, total, book) => {
-    const bar = $('#enrich-bar'), text = $('#enrich-text');
-    if (bar) bar.style.width = (done / total * 100) + '%';
-    if (text) text.textContent = done < total ? `Looked up ${done} of ${total}: ${book.title}` : `All ${total} looked up ✓`;
+  Enricher.run((done, total, book, failed) => {
+    $$('[id=enrich-bar]').forEach(bar => { bar.style.width = (done / total * 100) + '%'; });
+    const msg = done < total ? `Looked up ${done} of ${total}: ${book.title}`
+      : `All ${total} looked up ✓${failed ? ` (${failed} couldn't be reached and will be retried next time you open the app)` : ''}`;
+    $$('[id=enrich-text]').forEach(t => { t.textContent = msg; });
     if (done === total && ui.view !== 'settings') render();
   });
 }

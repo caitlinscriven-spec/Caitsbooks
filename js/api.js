@@ -63,6 +63,9 @@ function cleanSubjects(list) {
   return out;
 }
 
+// Bump when the cover-choosing rules change, so every book's cover is chosen again once.
+const COVER_RULES = 3;
+
 /** The cover of the English edition Open Library matched, unless it's an audiobook's. */
 function englishCover(d) {
   const ed = d.editions && d.editions.docs && d.editions.docs[0];
@@ -74,7 +77,8 @@ function englishCover(d) {
 
 /** Turn an Open Library search doc into our book shape (not yet saved). */
 function docToBook(d) {
-  const cover = englishCover(d) || d.cover_i || null;
+  const english = englishCover(d);
+  const cover = english || d.cover_i || null;
   const pos = d.series_position && d.series_position[0];
   return {
     olKey: d.key,
@@ -82,8 +86,10 @@ function docToBook(d) {
     authors: d.author_name || [],
     pages: d.number_of_pages_median || null,
     coverId: cover,
+    englishCoverId: english,
+    workCoverId: d.cover_i || null,
     cover: coverUrl(cover),
-    coverV2: true,
+    coverV: COVER_RULES,
     year: d.first_publish_year || null,
     isbn: (d.isbn || []).find(i => i.length === 13) || (d.isbn || [])[0] || null,
     subjects: cleanSubjects(d.subject),
@@ -112,7 +118,7 @@ const Api = {
     return (data.docs || []).map(docToBook);
   },
 
-  /** Best single match for an imported title/author. */
+  /** Best single match for an imported title/author. Tries progressively looser searches. */
   async lookup(title, author, isbn) {
     if (isbn) {
       try {
@@ -120,8 +126,19 @@ const Api = {
         if (r[0]) return r[0];
       } catch (e) { /* fall through */ }
     }
-    const r = await this.searchBy({ title, author, limit: 3 });
-    return r[0] || null;
+    const surname = (author || '').split(/\s+/).pop();
+    const short = title.split(/:|, or |\(/i)[0].trim(); // "Babel, or the Necessity of Violence" -> "Babel"
+    const sameAuthor = r => !surname || r.authors.some(a => normName(a).endsWith(normName(surname)));
+    const attempts = [
+      () => this.searchBy({ title, author, limit: 3 }),
+      () => this.searchBy({ title: short, author: surname, limit: 5 }),
+      () => this.search(`${short} ${surname}`, 5)
+    ];
+    for (const attempt of attempts) {
+      const r = (await attempt()).filter(sameAuthor);
+      if (r[0]) return r[0];
+    }
+    return null;
   },
 
   /** Every book in an Open Library series, ordered. */
@@ -172,16 +189,60 @@ const Api = {
     return out.sort((a, b) => (b.year || '0').localeCompare(a.year || '0')).slice(0, 24);
   },
 
-  /** Swap a stored book's cover for its English edition's, if Open Library has one. */
+  /** The most likely English print/ebook cover from a work's full edition list (newest, with an ISBN). */
+  async bestEnglishCover(olKey) {
+    const data = await getJSON(`${OL}${olKey}/editions.json?limit=200`);
+    const scored = [];
+    for (const e of data.entries || []) {
+      const eng = (e.languages || []).some(l => l.key === '/languages/eng');
+      const fmt = (e.physical_format || '').toLowerCase();
+      const audio = /audio|cd|mp3|cassette/.test(fmt) || /librivox/i.test((e.publishers || []).join(' '));
+      const id = (e.covers || []).find(c => c > 0);
+      if (!eng || audio || !id) continue;
+      const year = +((e.publish_date || '').match(/\d{4}/) || [0])[0];
+      let score = year;                                   // newer editions are the ones people own
+      if ((e.isbn_13 || []).length) score += 30;          // a real retail edition
+      if (/paperback|hardcover|ebook|kindle/.test(fmt)) score += 20;
+      scored.push({ id, score });
+    }
+    scored.sort((a, b) => b.score - a.score);
+    return scored[0] ? scored[0].id : null;
+  },
+
+  /** Is this cover from an English edition? Uses the edition's language, or failing that its title. */
+  async coverIsEnglish(coverId, title) {
+    const info = await getJSON(`https://covers.openlibrary.org/b/id/${coverId}.json`);
+    if (!info || !info.olid) return false;              // can't tell where it came from
+    const ed = await getJSON(`${OL}/books/${info.olid}.json`);
+    const langs = (ed.languages || []).map(l => l.key);
+    if (langs.length) return langs.includes('/languages/eng');
+    // No language recorded: trust it only if the edition carries the English title.
+    return !!title && normTitle(ed.title || '') === normTitle(title);
+  },
+
+  /**
+   * Choose a book's cover. The work's main cover is usually the familiar one, so keep it
+   * unless it belongs to a foreign edition; then use the matched English edition, then
+   * the best English print edition.
+   */
+  async pickCover({ olKey, title, workCoverId, englishCoverId }) {
+    if (workCoverId && (await this.coverIsEnglish(workCoverId, title).catch(() => false))) return workCoverId;
+    if (englishCoverId) return englishCoverId;
+    if (olKey) {
+      const best = await this.bestEnglishCover(olKey).catch(() => null);
+      if (best) return best;
+    }
+    return workCoverId || null;
+  },
+
+  /** Choose a stored book's cover again from scratch. Throws if Open Library can't be reached. */
   async recheckCover(book) {
     const url = `${OL}/search.json?q=${encodeURIComponent(`key:"${book.olKey}"`)}&lang=en&limit=1&fields=key,cover_i,editions,editions.cover_i,editions.language,editions.format,editions.publisher`;
     const d = ((await getJSON(url)).docs || [])[0];
-    const id = d && englishCover(d);
-    if (id && !book.coverPick) {
-      book.coverId = id;
-      book.cover = coverUrl(id);
-    }
-    book.coverV2 = true;
+    const id = await this.pickCover({ olKey: book.olKey, title: book.title, workCoverId: d && d.cover_i, englishCoverId: d && englishCover(d) });
+    if (id && !book.coverPick) setCover(book, id);
+    book.coverV = COVER_RULES;
+    book.coverAt = Date.now();
   },
 
   async description(olKey) {
@@ -192,16 +253,20 @@ const Api = {
   }
 };
 
+function setCover(book, id) {
+  book.coverId = id;
+  book.cover = coverUrl(id);
+  book.coverAt = Date.now();
+}
+
 /** Fill in cover/pages/subjects/series for a stored book (used after imports). */
 async function enrichBook(book) {
   const found = await Api.lookup(book.title, book.authors[0], book.isbn);
   if (found) {
     book.olKey = book.olKey || found.olKey;
-    if (found.coverId && (!book.coverId || !book.coverV2)) {
-      book.coverId = found.coverId;
-      book.cover = found.cover;
-    }
-    book.coverV2 = true;
+    const id = await Api.pickCover(found);
+    if (id && !book.coverPick) setCover(book, id);
+    book.coverV = COVER_RULES;
     book.pages = book.pages || found.pages;
     book.year = book.year || found.year;
     book.isbn = book.isbn || found.isbn;
@@ -216,6 +281,14 @@ async function enrichBook(book) {
   }
   if (!book.cover && book.isbn) book.cover = `https://covers.openlibrary.org/b/isbn/${book.isbn}-M.jpg?default=false`;
   book.enriched = true;
+  book.coverV = COVER_RULES;
+}
+
+/** Does this book still need details or an English cover from Open Library? */
+function needsLookup(b) {
+  if ((b.lookupTries || 0) >= 3) return false;
+  // Unlooked-up books, and (once per change of rules) every book whose cover she hasn't chosen herself.
+  return !b.enriched || (b.coverV !== COVER_RULES && !b.coverPick && (!!b.olKey || !b.coverId));
 }
 
 /** Background queue so a big import doesn't hammer Open Library. */
@@ -226,20 +299,23 @@ const Enricher = {
     this.running = true;
     try {
       // New imports need looking up; older books may need their cover swapped for an English one.
-      const todo = Store.books.filter(b => !b.enriched || (!b.coverV2 && b.olKey && !b.coverPick));
-      let done = 0;
+      const todo = Store.books.filter(needsLookup);
+      let done = 0, failed = 0;
       for (const book of todo) {
         try {
-          if (!book.enriched) await enrichBook(book);
+          if (!book.enriched || !book.olKey) await enrichBook(book);
           else await Api.recheckCover(book);
+          book.lookupTries = 0;
         } catch (e) {
-          book.coverV2 = true;
-          console.warn('enrich failed', book.title, e);
-          book.enriched = true; // don't retry forever; user can re-run from settings
+          // Open Library is often slow; try again on a later visit, giving up after three goes.
+          console.warn('look-up failed', book.title, e);
+          book.lookupTries = (book.lookupTries || 0) + 1;
+          if (book.lookupTries >= 3) { book.enriched = true; book.coverV = COVER_RULES; }
+          failed++;
         }
         done++;
         if (done % 5 === 0 || done === todo.length) Store.save();
-        onProgress && onProgress(done, todo.length, book);
+        onProgress && onProgress(done, todo.length, book, failed);
         await new Promise(r => setTimeout(r, 350));
       }
       Store.save();
