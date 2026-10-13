@@ -26,7 +26,16 @@ const Store = {
 
   /** Swap in a whole library (from storage, a merge or a backup) without timestamping it. */
   replace(data) {
-    this.data = Object.assign({ books: [], dismissed: [], deleted: {}, recCache: null }, data);
+    // Keep each book's object identity: open book cards and the background cover check hold
+    // references to books, and a sync arriving mid-way must update those, not orphan them.
+    const existing = new Map(this.data.books.map(b => [b.id, b]));
+    const books = (data.books || []).map(incoming => {
+      const live = existing.get(incoming.id);
+      if (!live) return incoming;
+      for (const k of Object.keys(live)) if (!(k in incoming)) delete live[k];
+      return Object.assign(live, incoming);
+    });
+    this.data = Object.assign({ books: [], dismissed: [], deleted: {}, recCache: null }, data, { books });
     this.data.settings = Object.assign({ goal: 30, name: 'Caitlin' }, data.settings || {});
     this.data.deleted = this.data.deleted || {};
     this.data.books.forEach(normaliseBook);

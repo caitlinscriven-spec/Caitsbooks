@@ -170,13 +170,14 @@ function formatBadge(b) {
   return formatOf(b) === 'audio' ? `<span class="fmt-badge" title="Audiobook">${ICONS.audio}</span>` : '';
 }
 
-/** Covers to try, best first: one she chose, her own edition's, then Open Library's English pick. */
+/** Covers to try, best first: one she chose, then the checked English cover, then her own edition's. */
 function coverSources(b) {
   const out = [];
   if (b.coverPick) out.push(coverUrl(b.coverPick));
-  if (b.userIsbn) out.push(`https://covers.openlibrary.org/b/isbn/${b.userIsbn}-M.jpg?default=false`);
   if (b.coverId) out.push(coverUrl(b.coverId));
   else if (b.cover) out.push(b.cover);
+  // Her own edition's cover, by ISBN, as a backup if the checked cover won't load.
+  if (b.userIsbn) out.push(`https://covers.openlibrary.org/b/isbn/${b.userIsbn}-M.jpg?default=false`);
   return [...new Set(out)];
 }
 
@@ -999,6 +1000,7 @@ function renderSettings(main) {
 
       <div class="panel">
         <h3 class="section-title">Housekeeping</h3>
+        <p class="small muted">App version ${esc(window.APP_VERSION || 'dev')}</p>
         <p class="small">${Store.books.length} books in total. ${unenriched ? `${unenriched} still need covers and details.` : 'All books have been looked up.'}
           “Refresh all covers” looks every book up again and switches it to an English edition's cover. Covers you picked yourself stay as they are.</p>
         <div class="progress"><div id="enrich-bar"></div></div><p class="small muted" id="enrich-text"></p>
@@ -1205,7 +1207,17 @@ function wireCloudPanel(main) {
 }
 
 function runEnricher() {
+  const banner = $('#lookup-status');
+  const pending = Store.books.filter(needsLookup).length;
+  if (banner && pending) { banner.hidden = false; banner.textContent = `Updating covers and details for ${pending} books…`; }
   Enricher.run((done, total, book, failed) => {
+    if (banner) {
+      banner.hidden = done >= total;
+      banner.textContent = `Updating covers and details: ${done} of ${total}…`;
+    }
+    // Let covers appear as they arrive, unless she's in the middle of something.
+    const busy = $('#modal').open || ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
+    if (done % 8 === 0 && done < total && !busy && ['library', 'tbr'].includes(ui.view)) render();
     $$('[id=enrich-bar]').forEach(bar => { bar.style.width = (done / total * 100) + '%'; });
     const msg = done < total ? `Looked up ${done} of ${total}: ${book.title}`
       : `All ${total} looked up ✓${failed ? ` (${failed} couldn't be reached and will be retried next time you open the app)` : ''}`;

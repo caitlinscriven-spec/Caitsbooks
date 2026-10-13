@@ -314,7 +314,7 @@ const Enricher = {
           failed++;
         }
         done++;
-        if (done % 5 === 0 || done === todo.length) Store.save();
+        Store.save(); // save each book as it's done, so nothing waits in memory
         onProgress && onProgress(done, todo.length, book, failed);
         await new Promise(r => setTimeout(r, 350));
       }

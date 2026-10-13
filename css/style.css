@@ -134,6 +134,7 @@ code { background: var(--paper-deep); padding: 0 .3em; border-radius: 4px; font-
 .sync-status { font-size: .78rem; margin: 10px 0 0; color: var(--ink-soft); min-height: 1.2em; }
 .sync-status a { color: inherit; }
 .sync-status.saved { color: var(--sage); }
+.sync-status.lookup { margin-top: 2px; color: var(--ink-soft); font-style: italic; }
 .sync-status.off, .sync-status.error { color: #b3263e; font-weight: 600; }
 .sync-status .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--rose); animation: pulse 1s infinite; vertical-align: middle; }
 @keyframes pulse { 50% { opacity: .25; } }
