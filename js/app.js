@@ -1218,11 +1218,11 @@ function wireCloudPanel(main) {
 function runEnricher() {
   const banner = $('#lookup-status');
   const pending = Store.books.filter(needsLookup).length;
-  if (banner && pending) { banner.hidden = false; banner.textContent = `Updating covers and details for ${pending} books…`; }
+  if (banner && pending) { banner.hidden = false; banner.textContent = `Finding covers for ${pending} books. Keep this page open; if you close it, it carries on next time.`; }
   Enricher.run((done, total, book, failed) => {
     if (banner) {
       banner.hidden = done >= total;
-      banner.textContent = `Updating covers and details: ${done} of ${total}…`;
+      banner.textContent = `Finding covers: ${done} of ${total}. Keep this page open; if you close it, it carries on next time.`;
     }
     // Let covers appear as they arrive, unless she's in the middle of something.
     const busy = $('#modal').open || ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);

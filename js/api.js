@@ -266,7 +266,9 @@ async function appleSearch(term, country) {
   const res = await fetch(url);
   if (!res.ok) throw Object.assign(new Error(`Apple said ${res.status}`), { status: res.status });
   const text = await res.text();
-  return text ? (JSON.parse(text).results || []) : [];
+  // A rate-limited Apple sends back an empty body, not an error: treat it as "try later".
+  if (!text.trim()) throw Object.assign(new Error('Apple Books is busy'), { status: 429 });
+  return JSON.parse(text).results || [];
 }
 
 /** Loose comparison key: no subtitle, series note, leading article or punctuation. */
@@ -366,7 +368,15 @@ const Enricher = {
           if (!book.coverApple && !book.coverPick && book.coverV !== COVER_RULES && book.olKey) await Api.recheckCover(book);
           book.coverV = COVER_RULES;
           book.lookupTries = 0;
+          delete book.appleWaits;
         } catch (e) {
+          if ((e.status === 429 || e.status === 403) && (book.appleWaits || 0) < 5) {
+            // Apple Books asked us to slow down: pause a minute, then retry this same book.
+            book.appleWaits = (book.appleWaits || 0) + 1;
+            appleNext = Date.now() + 60000;
+            todo.splice(todo.indexOf(book) + 1, 0, book);
+            continue;
+          }
           // Open Library is often slow; try again on a later visit, giving up after three goes.
           console.warn('look-up failed', book.title, e);
           book.lookupTries = (book.lookupTries || 0) + 1;
