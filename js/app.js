@@ -61,7 +61,12 @@ function onClick(e) {
     case 'start': startReading(book); toast(`“${book.title}” is on the counter`); refresh(); break;
     case 'set-format': setFormat(book, t.dataset.fmt); refresh(); break;
     case 'finish': finishFlow(book); break;
-    case 'reread': reRead(book); toast(`Round ${book.reads.length} of “${book.title}”. Pick print, ebook or audio on the counter.`); refresh(); break;
+    case 'reread': {
+      reRead(book, t.dataset.fmt || formatOf(book));
+      toast(`${t.dataset.fmt === 'audio' ? 'Re-listening to' : 'Re-reading'} “${book.title}”. It's on the counter, and it won't ask for a new rating.`);
+      refresh();
+      break;
+    }
     case 'dnf': {
       const r = currentRead(book);
       if (r) { r.end = today(); r.dnf = true; }
@@ -401,7 +406,10 @@ function resultCard(r, i, src, extra = '') {
       ${r.series ? `<p class="badge">${esc(r.series.name)}${r.series.position != null ? ' #' + r.series.position : ''}</p>` : ''}
       ${r.communityRating ? `<p class="small muted">Others: ${r.communityRating}★</p>` : ''}
       ${extra}
-      ${existing ? `<p class="owned" data-action="open" data-id="${existing.id}">✓ ${statusLabel}</p>` : `
+      ${existing ? `<p class="owned" data-action="open" data-id="${existing.id}">✓ ${statusLabel}</p>
+      ${existing.status === 'read' ? `<div class="btn-row">
+        <button class="btn small" data-action="reread" data-fmt="print" data-id="${existing.id}">Re-read</button>
+        <button class="btn small" data-action="reread" data-fmt="audio" data-id="${existing.id}">${ICONS.audio}Re-listen</button></div>` : ''}` : `
       <div class="btn-row">
         <button class="btn small" data-action="add-result" data-idx="${i}" data-as="want" data-src="${src}">Up next</button>
         <button class="btn small" data-action="add-result" data-idx="${i}" data-as="reading" data-src="${src}">Reading</button>
@@ -418,9 +426,10 @@ function addResult(idx, as, src) {
   const book = Store.add({
     ...structuredClone(r),
     status: as,
-    enriched: true,
+    enriched: !!r.olKey, // picks from Apple Books get their details looked up in the background
     reads: as === 'reading' ? [{ start: today(), end: null, format: 'print' }] : as === 'read' ? [{ start: null, end: today(), format: 'print' }] : []
   });
+  if (needsLookup(book)) runEnricher();
   if (as === 'read') {
     render();
     openBook(book.id);
@@ -474,7 +483,10 @@ function openBook(id) {
            <button class="btn" id="mark-read">I've read it</button>`,
     reading: `<button class="btn primary" data-action="finish" data-id="${id}">Finished</button>
               <button class="btn ghost" data-action="dnf" data-id="${id}">Did not finish</button>`,
-    read: `<button class="btn" data-action="reread" data-id="${id}">Re-read</button>`,
+    read: `<div class="reread-choice"><span class="small muted">Reading it again?</span>
+             <button class="btn small" data-action="reread" data-fmt="print" data-id="${id}">${ICONS.print}Re-read</button>
+             <button class="btn small" data-action="reread" data-fmt="ebook" data-id="${id}">${ICONS.ebook}Ebook</button>
+             <button class="btn small" data-action="reread" data-fmt="audio" data-id="${id}">${ICONS.audio}Re-listen</button></div>`,
     dnf: `<button class="btn" data-action="start" data-id="${id}">Give it another go</button>
           <button class="btn ghost" data-action="want" data-id="${id}">Back to up next</button>`
   }[b.status];
@@ -636,6 +648,14 @@ async function loadNextInSeries(b) {
 }
 
 function finishFlow(book) {
+  const r = currentRead(book);
+  if (r && r.reread && book.rating) {
+    // A re-read counts toward this year's reading, but keeps the original rating.
+    finishReading(book);
+    toast(`Re-read finished. It counts toward ${new Date().getFullYear()}, and your ${fmtRating(book.rating)}★ stays.`);
+    render();
+    return;
+  }
   finishReading(book);
   toast(`“${book.title}” is shelved. How many stars?`);
   render();
@@ -773,7 +793,8 @@ function renderStats(main) {
     .map(([a, s]) => ({ label: a, value: s.n, tip: s.rated ? `avg ${(s.sum / s.rated).toFixed(2)}★` : '' })));
 
   const prof = tasteProfile(uniqBooks(inPeriod), { recency: false });
-  Charts.hbars($('#c-subjects'), prof.subjects.slice(0, 8).map(s => ({ label: s.name, value: Math.round(s.score * 100) / 100, tip: `${s.n} book${s.n > 1 ? 's' : ''}` })), { format: v => '♥'.repeat(Math.min(5, Math.max(1, Math.round(v)))) });
+  const themes = prof.genres.length >= 3 ? prof.genres : prof.subjects;
+  Charts.hbars($('#c-subjects'), themes.slice(0, 8).map(s => ({ label: s.name, value: Math.round(s.score * 100) / 100, tip: `${s.n} book${s.n > 1 ? 's' : ''}` })), { format: v => '♥'.repeat(Math.min(5, Math.max(1, Math.round(v)))) });
 }
 
 function tile(big, label, sub) {
@@ -805,38 +826,141 @@ function kfmt(v) { return v >= 1000 ? (v / 1000).toFixed(v >= 10000 ? 0 : 1) + '
 /** Caitlin's scale: 3★ = "didn't vibe", 4★ = genuinely good, 5★ = rare treasure. */
 function weight(r) { return r - 3.25; }
 
-/** Taste changes. A read counts in full now, half after five years, a quarter
-    after ten; a book with no finish date is assumed to be a long-ago read. */
+/** Taste changes. A dated read counts in full now, half after five years, a quarter after ten.
+    With no finish date, the publication year says how long ago it could have been read:
+    a 2023 book can't be a childhood read, but an undated 1908 one probably is. */
 const UNDATED_TASTE = 0.25;
 function freshness(b) {
   const d = lastFinish(b);
-  if (!d) return UNDATED_TASTE;
-  const years = (Date.now() - Date.parse(d)) / (365.25 * 864e5);
-  return Math.max(0.25, Math.min(1, Math.pow(0.5, years / 5)));
+  if (d) {
+    const years = (Date.now() - Date.parse(d)) / (365.25 * 864e5);
+    return Math.max(0.25, Math.min(1, Math.pow(0.5, years / 5)));
+  }
+  const now = new Date().getFullYear();
+  if (b.year && b.year >= now - 3) return 1;
+  if (b.year && b.year >= now - 8) return 0.7;
+  if (b.year && b.year >= now - 15) return 0.45;
+  return UNDATED_TASTE;
 }
 
 function tasteProfile(books, { recency = true } = {}) {
   const rated = books.filter(b => b.rating);
-  const authors = {}, subjects = {};
+  const authors = {}, subjects = {}, genres = {};
   for (const b of rated) {
     const f = recency ? freshness(b) : 1;
     const w = weight(b.rating) * f;
     for (const a of b.authors.slice(0, 2)) {
-      authors[a] = authors[a] || { name: a, score: 0, n: 0, sum: 0, fresh: 0 };
+      authors[a] = authors[a] || { name: a, score: 0, n: 0, sum: 0, fresh: 0, books: [] };
       authors[a].score += w; authors[a].n++; authors[a].sum += b.rating;
       authors[a].fresh = Math.max(authors[a].fresh, f);
+      authors[a].books.push(b);
     }
     for (const s of b.subjects) {
       const k = s.toLowerCase();
       subjects[k] = subjects[k] || { name: s, score: 0, n: 0 };
       subjects[k].score += w; subjects[k].n++;
     }
+    for (const g of b.genres || []) {
+      genres[g] = genres[g] || { name: g, score: 0, n: 0 };
+      genres[g].score += w; genres[g].n++;
+    }
   }
   return {
     authors: Object.values(authors).sort((a, b) => b.score - a.score),
     subjects: Object.values(subjects).filter(s => s.score > 0).sort((a, b) => b.score - a.score),
+    genres: Object.values(genres).filter(g => g.score > 0).sort((a, b) => b.score - a.score),
     subjectMap: subjects,
+    genreMap: genres,
     authorMap: authors
+  };
+}
+
+/** How well a candidate's genres match what she rates highly (negative for genres she doesn't vibe with). */
+function genreFit(prof, genres) {
+  let fit = 0;
+  for (const g of genres || []) {
+    const p = prof.genreMap[g];
+    if (p) fit += p.score / (p.n + 3);
+  }
+  return fit;
+}
+
+function avgOf(a) { return a.sum / a.n; }
+function listTitles(books) {
+  const t = books.map(b => `“${b.title}”`);
+  return t.length > 1 ? `${t.slice(0, -1).join(', ')} and ${t[t.length - 1]}` : t[0];
+}
+
+/** An author's books worth suggesting, minus anything that's book 2+ of a series.
+    Apple Books first (better covers and genres); Open Library if Apple is busy. */
+const appleState = { busyCount: 0 };
+async function authorPicks(name, ok, onWait, minYear = 0) {
+  const sur = surnameKey(name);
+  // Open Library sorted by how many readers have shelved each book: the books people actually start with.
+  const olPromise = Api.searchBy({ author: name, sort: 'readinglog', limit: 40 }).catch(() => []);
+  let apple = null;
+  if (appleState.busyCount < 2) {
+    try {
+      apple = await appleSearch(name, 'au', { attribute: 'authorTerm', limit: 25 });
+      appleState.busyCount = 0;
+    } catch (e) {
+      if (e.status === 429) {
+        // Apple asked us to slow down: wait once, then fall back to Open Library if it's still busy.
+        onWait && onWait();
+        await new Promise(r => setTimeout(r, 45000));
+        try { apple = await appleSearch(name, 'au', { attribute: 'authorTerm', limit: 25 }); appleState.busyCount = 0; }
+        catch (e2) { appleState.busyCount++; }
+      }
+    }
+  }
+  const ol = await olPromise;
+  const later = new Set(ol.filter(b => b.series && b.series.position > 1).map(b => normTitle(b.title)));
+  const sameAuthor = a => coverKey(a).includes(sur);
+  const fromApple = (apple || [])
+    .filter(r => sameAuthor(r.artistName))
+    .filter(r => !/(book|#|vol\.?|volume|part)\s*([2-9]|\d\d)\b/i.test(r.trackName || ''))
+    .map(appleCandidate);
+  // Most-shelved first (using Apple's edition for the cover and genres when it has one), then anything else Apple sells.
+  const appleByTitle = new Map(fromApple.map(c => [normTitle(c.title), c]));
+  const popular = ol
+    .filter(b => sameAuthor(b.authors[0] || '') && !(b.series && b.series.position > 1)) // their own book, not one they contributed to
+    .map(b => appleByTitle.get(normTitle(b.title)) || (b.coverId ? { ...b, recKey: 'ol:' + b.olKey } : null))
+    .filter(Boolean);
+  const rest = fromApple.filter(c => !popular.includes(c));
+  return [...popular, ...rest]
+    .filter(c => !later.has(normTitle(c.title)))
+    .filter(c => !/\buntitled\b|^(tbc|tba|title tbc)\b/i.test(c.title))
+    .filter(c => (c.title.match(/[^\x00-\x7F’‘“”–—…]/g) || []).length < 2 && !/[åäöøæß]/i.test(c.title)) // a foreign edition's title
+    .filter(c => !minYear || !c.year || c.year >= minYear) // a namesake from another century
+    .filter(ok);
+}
+
+/** Is this book the second-or-later in a series? Asks Open Library when we don't already know. */
+async function laterInSeries(c) {
+  if (c.series && c.series.position != null) return c.series.position > 1;
+  try {
+    const hit = (await Api.searchBy({ title: c.title, author: c.authors[0], limit: 1 }))[0];
+    return !!(hit && hit.series && hit.series.position > 1);
+  } catch (e) { return false; }
+}
+async function firstStandalone(list, max = 4) {
+  for (const c of list.slice(0, max)) if (!(await laterInSeries(c))) return c;
+  return null;
+}
+
+/** Turn an Apple Books result into something the shop can show and add. */
+function appleCandidate(r) {
+  const url = appleArt(r);
+  return {
+    recKey: 'apple:' + r.trackId,
+    title: (r.trackName || '').replace(/\s*[(\[].*?[)\]]\s*$/, '').replace(/:\s*a novel$/i, '').trim(),
+    authors: [r.artistName],
+    year: +(r.releaseDate || '').slice(0, 4) || null,
+    cover: url, coverApple: url, appleTried: true,
+    genres: appleGenres(r), genresTried: true,
+    communityRating: r.averageUserRating || null,
+    ratingsCount: r.userRatingCount || 0,
+    subjects: [], series: null
   };
 }
 
@@ -844,109 +968,158 @@ let recList = [];
 
 function renderRecs(main) {
   const rated = Store.books.filter(b => b.rating && b.status === 'read');
+  const prof = tasteProfile(rated);
+  const loving = prof.genres.slice(0, 5).map(g => g.name);
+  const authorsNow = prof.authors.filter(a => avgOf(a) >= 4).slice(0, 4).map(a => a.name);
   main.innerHTML = `
     <section class="intro">
       <p class="eyebrow">Picked for you</p>
       <h2>What to read next</h2>
-      <p>Picked from your own ratings. A 3★ counts as “didn't vibe” and a 4★ as a genuine thumbs up, so a 5★ pulls hardest.</p>
-      <p class="small">Taste changes, so recent reads count most. Books from years ago, or imported without a finish date, count for a quarter as much. Re-read one, or add when you read it, to give it full weight again.</p>
+      ${loving.length || authorsNow.length ? `<p class="taste-now">Right now you're loving ${loving.length ? `<strong>${loving.map(esc).join(', ')}</strong>` : ''}${loving.length && authorsNow.length ? ', and ' : ''}${authorsNow.length ? `<strong>${authorsNow.map(esc).join(', ')}</strong>` : ''}.</p>` : ''}
+      <p class="small muted">Built from your ratings: 3★ counts as “didn't vibe”, 4★ as a thumbs up, 5★ pulls hardest. Recent reads count most; childhood favourites count for less. Authors you didn't vibe with are left out.</p>
       <button class="btn" id="refresh-recs">Fresh picks</button>
     </section>
-    <div id="recs">${rated.length < 3 ? `<p class="muted">Rate at least three books (or import your history in <a href="#settings">Settings</a>) and I'll start suggesting.</p>` : loadingHTML('Pulling a few things off the shelves for you…')}</div>`;
+    <div id="recs">${rated.length < 3 ? `<p class="muted">Rate at least three books (or import your history in <a href="#settings">Settings</a>) and I'll start suggesting.</p>` : loadingHTML('Asking around the shop…')}</div>`;
   $('#refresh-recs').onclick = () => { Store.data.recCache = null; renderRecs(main); };
   if (rated.length < 3) return;
 
   const cache = Store.data.recCache;
-  if (cache && cache.v === 2 && Date.now() - cache.at < 864e5 * 2) drawRecs(cache.sections);
-  else buildRecs().then(sections => {
-    Store.data.recCache = { v: 2, at: Date.now(), sections };
+  if (cache && cache.v === 3 && Date.now() - cache.at < 864e5 * 3) { drawRecs(cache.sections); return; }
+  buildRecs((done, total, waiting) => {
+    const el = $('#recs .loading');
+    if (el) el.textContent = waiting ? `Apple Books is busy, so I'm waiting a minute… (${done} of ${total})` : `Asking around the shop… ${done} of ${total}. This takes a minute or two.`;
+  }).then(sections => {
+    Store.data.recCache = { v: 3, at: Date.now(), sections };
     Store.save();
     if (ui.view === 'recs') drawRecs(sections);
   }).catch(err => {
-    if (ui.view === 'recs') $('#recs').innerHTML = `<p class="muted">Couldn't reach Open Library (${esc(err.message)}). Try again shortly.</p>`;
+    if (ui.view === 'recs') $('#recs').innerHTML = `<p class="muted">Couldn't finish looking (${esc(err.message)}). Tap “Fresh picks” to try again.</p>`;
   });
 }
 
-async function buildRecs() {
-  const books = Store.books;
-  const prof = tasteProfile(books.filter(b => b.status === 'read'));
+async function buildRecs(progress) {
+  const read = Store.books.filter(b => b.status === 'read' || finishedReads(b).length);
+  const prof = tasteProfile(read);
   const dismissed = new Set(Store.data.dismissed || []);
+  const readAuthors = new Set(Object.keys(prof.authorMap).map(similarKey));
+  const disliked = new Set(prof.authors.filter(a => avgOf(a) <= 3.4).map(a => similarKey(a.name)));
   const seen = new Set();
-  const keep = (c, allowMidSeries) => {
-    if (!c || !c.olKey || seen.has(c.olKey) || dismissed.has(c.olKey)) return false;
-    // Don't drop her into book 4 of something she hasn't started.
-    if (!allowMidSeries && c.series && c.series.position > 1) return false;
-    if (/ \/ |box(ed)? set|collection|omnibus|\bbooks? \d+\s*-\s*\d+/i.test(c.title) || c.pages > 2000) return false;
-    if (Store.findMatch(c)) return false;
-    const a = prof.authorMap[c.authors[0]];
-    if (a && a.sum / a.n < 3.25) return false; // author you didn't vibe with
-    seen.add(c.olKey);
+  // Already read? Compare titles and the author's surname, so "Fredrik Backman & Henning Koch" still matches.
+  const mine = new Set(Store.books.map(b => normTitle(b.title) + '|' + surnameKey(b.authors[0])));
+  const owned = c => Store.findMatch(c) || mine.has(normTitle(c.title) + '|' + surnameKey(c.authors[0]))
+    || mine.has(normTitle(c.title) + '|' + surnameKey((c.authors[0] || '').split(/\s*(?:&|,| and )\s*/)[0]));
+  const ok = c => {
+    if (!c || !c.title || dismissed.has(c.recKey)) return false;
+    const key = normTitle(c.title) + '|' + similarKey(c.authors[0]);
+    if (seen.has(key) || seen.has(c.recKey)) return false;
+    if (owned(c)) return false;
+    if (disliked.has(similarKey(c.authors[0]))) return false;
+    if (/box(ed)? set|collection|omnibus|bundle|books? \d+\s*[-–&]\s*\d+|trilogy|summary of|study guide|sampler|preview/i.test(c.title)) return false;
+    seen.add(key); seen.add(c.recKey);
     return true;
   };
-  const score = c => {
-    let s = (c.communityRating || 3.5) * 0.4;
-    for (const sub of c.subjects) { const p = prof.subjectMap[sub.toLowerCase()]; if (p) s += p.score / Math.max(2, p.n); }
-    const a = prof.authorMap[c.authors[0]];
-    if (a) s += a.score;
-    if (!c.cover) s -= 1;
-    return s;
-  };
+  // A candidate's appeal: her taste in its genres, how well-loved it is, and a nudge for newer books.
+  const appeal = c => genreFit(prof, c.genres)
+    + (c.communityRating ? (c.communityRating - 4) * 0.6 : 0)
+    + Math.log10(1 + (c.ratingsCount || 0)) * 0.35
+    + (c.year && c.year >= new Date().getFullYear() - 4 ? 0.3 : 0);
 
-  // 1. Next in series you're enjoying
-  const seriesGroups = {};
-  for (const b of books.filter(b => b.series && b.status === 'read')) {
-    const k = b.series.key || b.series.name;
-    (seriesGroups[k] = seriesGroups[k] || []).push(b);
-  }
-  const seriesRecs = [];
-  const groups = Object.values(seriesGroups)
-    .map(list => ({
-      list,
-      avg: list.filter(b => b.rating).reduce((s, b) => s + b.rating, 0) / Math.max(1, list.filter(b => b.rating).length),
-      fresh: Math.max(...list.map(freshness))
-    }))
-    // Only series you've read in roughly the last five years; childhood series stay put.
-    .filter(g => g.avg >= 3.5 && g.fresh >= 0.5)
+  // 1. Next in series she's enjoying (and has read recently enough to still care about).
+  const groups = {};
+  for (const b of read.filter(b => b.series)) (groups[b.series.key || b.series.name] = groups[b.series.key || b.series.name] || []).push(b);
+  const seriesPlan = Object.values(groups)
+    .map(list => {
+      const rated = list.filter(b => b.rating);
+      return { list, avg: rated.reduce((s, b) => s + b.rating, 0) / Math.max(1, rated.length), fresh: Math.max(...list.map(freshness)) };
+    })
+    .filter(g => g.avg >= 3.75 && g.fresh >= 0.5)
     .sort((a, b) => b.avg * b.fresh - a.avg * a.fresh)
-    .slice(0, 8);
-  await Promise.all(groups.map(async g => {
+    .slice(0, 6);
+
+  // 2. Authors she loves right now.
+  const loved = prof.authors.filter(a => avgOf(a) >= 4 && a.score >= 0.6).slice(0, 8);
+
+  // 3. Authors like the ones she loves that she hasn't read yet. Each favourite gets a fair share,
+  //    so thirteen Lisa Jewells can't crowd out one beloved Rebecca Yarros.
+  const kin = {};
+  const seedAuthors = prof.authors.filter(a => avgOf(a) >= 3.9 && a.score > 0 && SIMILAR_INDEX[similarKey(a.name)]).slice(0, 9);
+  for (const a of seedAuthors) {
+    for (const other of SIMILAR_INDEX[similarKey(a.name)]) {
+      const k = similarKey(other);
+      if (readAuthors.has(k)) continue;
+      kin[k] = kin[k] || { name: other, weight: 0, seeds: [] };
+      kin[k].weight += a.score;
+      kin[k].seeds.push(a);
+    }
+  }
+  const kinPlan = [];
+  for (let round = 0; round < 2; round++) {
+    for (const a of seedAuthors) {
+      const next = Object.values(kin)
+        .filter(k => k.seeds[0] === a && !kinPlan.includes(k))
+        .sort((x, y) => y.weight - x.weight)[0];
+      if (next) kinPlan.push(next);
+    }
+  }
+
+  appleState.busyCount = 0;
+  const total = seriesPlan.length + loved.length + kinPlan.length;
+  let done = 0;
+  const tick = () => progress && progress(++done, total);
+  const busy = () => progress && progress(done, total, true);
+
+  const seriesRecs = [];
+  for (const g of seriesPlan) {
     const furthest = g.list.slice().sort((a, b) => (b.series.position || 0) - (a.series.position || 0))[0];
     try {
       const next = await loadNextInSeries(furthest);
-      if (next && keep({ ...next, olKey: next.olKey || 'series:' + next.title }, true)) {
-        seriesRecs.push({ ...next, why: `You gave ${furthest.series.name} ${fmtRating(g.avg)}★ on average` });
-      }
+      const c = next && { ...next, recKey: 'series:' + normTitle(next.title) };
+      if (c && ok(c)) seriesRecs.push({ ...c, why: `Next in ${furthest.series.name}. You gave the series ${fmtRating(Math.round(g.avg * 4) / 4)}★.` });
     } catch (e) { /* skip */ }
-  }));
+    tick();
+  }
 
-  // 2. More from authors you adore
-  const loved = prof.authors.filter(a => a.sum / a.n >= 3.75 && a.score >= 0.5).slice(0, 5);
   const authorRecs = [];
-  await Promise.all(loved.map(async a => {
+  for (const a of loved) {
     try {
-      const res = await Api.searchBy({ author: a.name, sort: 'rating', limit: 20 });
-      res.filter(c => c.authors[0] === a.name || normName(c.authors[0]) === normName(a.name))
-        .filter(c => keep(c)).slice(0, 3)
-        .forEach(c => authorRecs.push({ ...c, why: `You average ${fmtRating(Math.round(a.sum / a.n * 4) / 4)}★ for ${a.name}${a.fresh < 0.5 ? ' (mostly a while ago)' : ''}` }));
-    } catch (e) { /* skip */ }
-  }));
+      const minYear = Math.min(...a.books.map(b => b.year || 9999)) - 8;
+      const ranked = await authorPicks(a.name, ok, busy, minYear < 9000 ? minYear : 0);
+      const found = [];
+      for (const c of ranked.slice(0, 5)) { if (found.length < 2 && !(await laterInSeries(c))) found.push(c); }
+      found.forEach(c => authorRecs.push({ ...c, score: a.score + appeal(c), why: `More from ${a.name}. You average ${fmtRating(Math.round(avgOf(a) * 4) / 4)}★ for their books.` }));
+    } catch (e) { /* Apple stayed busy: skip this author this time */ }
+    tick();
+  }
 
-  // 3. Themes you love
-  const topSubjects = prof.subjects.filter(s => s.n >= 2).slice(0, 6);
-  const themed = [];
-  await Promise.all(topSubjects.map(async s => {
+  const kinRecs = [];
+  for (const k of kinPlan) {
     try {
-      const res = await Api.searchBy({ subject: s.name, sort: 'rating', limit: 30 });
-      res.forEach(c => themed.push({ ...c, why: `Because you love ${s.name.toLowerCase()}` }));
-    } catch (e) { /* skip */ }
-  }));
-  const themeRecs = themed.sort((a, b) => score(b) - score(a)).filter(c => keep(c)).slice(0, 12);
+      // New-to-her author: start where most readers start (for a series, that's nearly always book 1).
+      const found = await authorPicks(k.name, ok, busy, 1975);
+      const best = await firstStandalone(found);
+      if (best && genreFit(prof, best.genres) >= -0.05) {
+        const seedBooks = k.seeds.flatMap(s => s.books).sort((x, y) => y.rating - x.rating || freshness(y) - freshness(x)).slice(0, 2);
+        kinRecs.push({ ...best, score: k.weight + appeal(best), seed: k.seeds[0].name, why: `Because you loved ${listTitles(seedBooks)}.` });
+      }
+    } catch (e) { /* Apple stayed busy: skip this author this time */ }
+    tick();
+  }
 
+  const byScore = (a, b) => (b.score || 0) - (a.score || 0);
   return [
+    { title: 'Because of what you loved', items: roundRobin(kinRecs.sort(byScore), c => c.seed).slice(0, 12) },
     { title: 'Next in a series you’re enjoying', items: seriesRecs },
-    { title: 'More from authors you adore', items: authorRecs.sort((a, b) => score(b) - score(a)).slice(0, 12) },
-    { title: 'Matched to your favourite themes', items: themeRecs }
+    { title: 'More from authors you adore', items: authorRecs.sort(byScore).slice(0, 12) }
   ];
+}
+
+/** Interleave items by group, best first in each, so every group gets a turn near the top. */
+function roundRobin(items, groupOf) {
+  const groups = new Map();
+  for (const it of items) { const g = groupOf(it); if (!groups.has(g)) groups.set(g, []); groups.get(g).push(it); }
+  const out = [];
+  for (let i = 0; out.length < items.length; i++) for (const list of groups.values()) if (list[i]) out.push(list[i]);
+  return out;
 }
 
 function drawRecs(sections) {
@@ -955,7 +1128,7 @@ function drawRecs(sections) {
     <h3 class="section-title">${esc(s.title)}</h3>
     <div class="card-grid">${s.items.map(c => {
       const i = recList.push(c) - 1;
-      return resultCard(c, i, 'recs', `<p class="why">${esc(c.why)}</p><button class="link small" data-action="dismiss-rec" data-key="${esc(c.olKey || '')}">not for me</button>`);
+      return resultCard(c, i, 'recs', `<p class="why">${esc(c.why)}</p><button class="link small" data-action="dismiss-rec" data-key="${esc(c.recKey || c.olKey || '')}">not for me</button>`);
     }).join('')}</div>`).join('');
   $('#recs').innerHTML = html || `<p class="muted">I couldn't find anything new. Try rating a few more books, or tap “Fresh picks”.</p>`;
 }
@@ -963,7 +1136,7 @@ function drawRecs(sections) {
 function dismissRec(key) {
   Store.data.dismissed = [...new Set([...(Store.data.dismissed || []), key])];
   const c = Store.data.recCache;
-  if (c) c.sections.forEach(s => s.items = s.items.filter(i => i.olKey !== key));
+  if (c) c.sections.forEach(s => s.items = s.items.filter(i => (i.recKey || i.olKey) !== key));
   Store.save();
   drawRecs(c ? c.sections : []);
 }

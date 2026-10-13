@@ -196,7 +196,8 @@ function finishReading(book, date) {
   Store.save();
 }
 
-function reRead(book) {
+function reRead(book, format) {
+  if (format) book.format = format;
   book.reads.push({ start: today(), end: null, reread: true, format: book.format || 'print' });
   book.status = 'reading';
   Store.save();

@@ -258,11 +258,11 @@ const Api = {
 // indie titles Open Library lacks. It rate-limits hard, so calls are spaced out.
 
 let appleNext = 0;
-async function appleSearch(term, country) {
+async function appleSearch(term, country, extra = {}) {
   const wait = appleNext - Date.now();
   appleNext = Math.max(Date.now(), appleNext) + 3200;
   if (wait > 0) await new Promise(r => setTimeout(r, wait));
-  const url = `https://itunes.apple.com/search?${new URLSearchParams({ term, entity: 'ebook', limit: 15, country })}`;
+  const url = `https://itunes.apple.com/search?${new URLSearchParams({ term, entity: 'ebook', limit: 15, country, ...extra })}`;
   const res = await fetch(url);
   if (!res.ok) throw Object.assign(new Error(`Apple said ${res.status}`), { status: res.status });
   const text = await res.text();
@@ -282,6 +282,10 @@ function surnameKey(author) {
   return coverKey(parts[parts.length - 1] || '');
 }
 function appleArt(r) { return (r.artworkUrl100 || '').replace('100x100bb', '600x900bb'); }
+/** Apple's genres, minus the catch-alls that say nothing about taste. */
+function appleGenres(r) {
+  return (r.genres || []).filter(g => !/^(books|fiction & literature)$/i.test(g));
+}
 
 /** Apple Books results that really are this book: same title and the author's surname. */
 async function appleMatches(title, author, { all = false } = {}) {
@@ -293,7 +297,7 @@ async function appleMatches(title, author, { all = false } = {}) {
       for (const r of results) {
         const t = coverKey(r.trackName), a = coverKey(r.artistName);
         const sameTitle = t === want || (want.length > 6 && t.startsWith(want));
-        if (sameTitle && (!sur || a.includes(sur)) && r.artworkUrl100) out.push({ url: appleArt(r), label: r.trackName, country });
+        if (sameTitle && (!sur || a.includes(sur)) && r.artworkUrl100) out.push({ url: appleArt(r), label: r.trackName, country, genres: appleGenres(r) });
       }
       if (out.length && !all) return out;
     }
@@ -302,9 +306,10 @@ async function appleMatches(title, author, { all = false } = {}) {
   return out;
 }
 
-async function appleCover(book) {
+/** Apple's cover and genres for a book in the library, or null if Apple doesn't sell it. */
+async function appleLookup(book) {
   const found = await appleMatches(book.title, book.authors[0]);
-  return found[0] ? found[0].url : null;
+  return found[0] || null;
 }
 
 function setCover(book, id) {
@@ -342,7 +347,7 @@ async function enrichBook(book) {
 function needsLookup(b) {
   if ((b.lookupTries || 0) >= 3) return false;
   // Unlooked-up books, and (once per change of rules) every book whose cover she hasn't chosen herself.
-  return !b.enriched || (b.coverV !== COVER_RULES && !b.coverPick);
+  return !b.enriched || (b.coverV !== COVER_RULES && !b.coverPick) || (!b.genres && !b.genresTried);
 }
 
 /** Background queue so a big import doesn't hammer Open Library. */
@@ -360,10 +365,15 @@ const Enricher = {
           // Details (pages, series, subjects) still come from Open Library.
           if (!book.enriched || !book.olKey) await enrichBook(book);
           // The cover: Apple Books first, then Open Library's English editions.
-          if (!book.coverPick && !book.appleTried) {
-            const url = await appleCover(book);
+          // One Apple look-up gives both the cover and clean genres (used for recommendations).
+          if (!book.appleTried || (!book.genres && !book.genresTried)) {
+            const hit = await appleLookup(book);
             book.appleTried = true;
-            if (url) { book.coverApple = url; book.coverAt = Date.now(); }
+            book.genresTried = true;
+            if (hit) {
+              if (!book.coverPick && !book.coverApple) { book.coverApple = hit.url; book.coverAt = Date.now(); }
+              if (hit.genres.length) book.genres = hit.genres;
+            }
           }
           if (!book.coverApple && !book.coverPick && book.coverV !== COVER_RULES && book.olKey) await Api.recheckCover(book);
           book.coverV = COVER_RULES;

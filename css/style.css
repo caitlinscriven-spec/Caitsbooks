@@ -559,3 +559,7 @@ span.chip { cursor: default; }
   .fascia-small:first-child { font-size: .8rem; letter-spacing: .3em; }
   .fmt-picker button { padding: 6px 8px; font-size: .74rem; gap: 4px; }
 }
+
+.reread-choice { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.reread-choice .btn { display: inline-flex; align-items: center; gap: 6px; }
+.taste-now { font-size: 1.05rem; max-width: 60ch; }

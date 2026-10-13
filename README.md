@@ -5,13 +5,17 @@ A personal book tracker dressed as an independent bookshop: an oxblood-and-gold 
 ## What it does
 
 - **Find a book**: search Open Library by title, author or ISBN. It fills in author, page count, cover, year and series position.
-- **Track reading**: *To read → Reading → Finished*, plus *Did not finish* and a **↻ Re-read** button. Every read keeps its own start and finish dates.
+- **Track reading**: *To read → Reading → Finished*, plus *Did not finish*. Any book you've read can be re-read or re-listened to (from its card, or from Find a book); a re-read counts toward that year's stats and keeps your original rating. Every read keeps its own dates and format.
 - **Quarter-star ratings**: tap the left or right part of a star for ¼, ½, ¾ or a full star. Arrow keys work too.
 - **The shop**: what you're reading sits on the counter, your highest-rated books are staff picks with your own shelf-talker notes, recent reads are new arrivals, and everything you've read is a wall of covers you can search and sort.
 - **Audiobooks**: every read is marked Print, Ebook or Audiobook (with an optional narrator), and Stats shows how you read and whether you rate audiobooks differently. Imports pick this up from Goodreads' *Binding* and StoryGraph's *Format* columns.
 - **Next in series**: each book shows the next one in its series (Open Library, with Wikidata as a fallback), with a one-tap "add to to-read".
-- **Stats**: books, pages and average rating by month and by year, how you rate quarter-star by quarter-star, top authors, favourite themes and a yearly goal. The enchanted rose glows brighter as you get closer to your goal.
-- **Recommendations**: based on *your* scale. 3★ counts as "didn't vibe", 4★ as a genuine thumbs up, and 5★ pulls hardest. Suggestions come from three places: the next book in series you're enjoying, more from authors you love, and books matching themes you rate highly.
+- **Stats**: books, pages and average rating by month and by year, how you rate quarter-star by quarter-star, how you read (print, ebook, audio), top authors, favourite genres and a yearly goal.
+- **Recommendations**: based on *your* scale (3★ = didn't vibe, 4★ = thumbs up, 5★ pulls hardest) and on how recently you read things (undated books are judged by when they were published, so childhood reads count for less). Three kinds of pick, each with its reason:
+  - *Because you loved…*: authors similar to the ones you rate highly (from a bookseller's map in `js/similar.js`), starting with the book most readers start with;
+  - *Next in a series you're enjoying*;
+  - *More from authors you adore*, most-read first.
+  Authors you didn't vibe with are never used. Covers and genres come from Apple Books; Open Library fills gaps.
 
 ## Covers
 
