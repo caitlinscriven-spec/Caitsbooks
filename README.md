@@ -15,12 +15,14 @@ A personal book tracker dressed as an independent bookshop: an oxblood-and-gold 
 
 ## Covers
 
-Covers come from Open Library, which mixes editions from every language. The app picks the cover in this order:
+The app picks each book's cover in this order:
 
-1. one you chose with **Change cover** on a book (English print and ebook editions only),
-2. the exact edition in your imported file (its ISBN),
-3. Open Library's best English print edition (audiobook covers are skipped),
-4. Open Library's general cover.
+1. one you chose with **Change cover** on the book (it offers Apple Books and English Open Library editions),
+2. **Apple Books**: the edition sold in Australian (then US and UK) stores, matched on title and author,
+3. Open Library's English edition,
+4. the edition in your imported file (its ISBN).
+
+Covers are looked up once per book, saved to the cloud with the rest of your library, and shared across your devices. Settings → **Find missing covers** retries any book still showing a plain coloured cover.
 
 ## Importing your old ratings
 

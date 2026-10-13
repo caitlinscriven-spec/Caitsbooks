@@ -190,7 +190,7 @@ function mergeLibraries(local, remote) {
     }
     // Covers follow whichever device looked them up most recently, whoever edited the book last.
     if ((lose.coverAt || 0) > (merged.coverAt || 0)) {
-      for (const k of ['coverId', 'cover', 'coverV', 'coverAt']) if (k in lose) merged[k] = lose[k];
+      for (const k of ['coverId', 'cover', 'coverV', 'coverAt', 'coverApple', 'appleTried']) if (k in lose) merged[k] = lose[k];
     }
     byId.set(b.id, merged);
   }

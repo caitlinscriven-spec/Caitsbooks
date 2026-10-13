@@ -64,7 +64,7 @@ function cleanSubjects(list) {
 }
 
 // Bump when the cover-choosing rules change, so every book's cover is chosen again once.
-const COVER_RULES = 3;
+const COVER_RULES = 4;
 
 /** The cover of the English edition Open Library matched, unless it's an audiobook's. */
 function englishCover(d) {
@@ -253,6 +253,58 @@ const Api = {
   }
 };
 
+/* ---------------------------------------------------------- Apple Books */
+// Apple's catalogue has the covers you'd see in an Australian bookshop, including recent and
+// indie titles Open Library lacks. It rate-limits hard, so calls are spaced out.
+
+let appleNext = 0;
+async function appleSearch(term, country) {
+  const wait = appleNext - Date.now();
+  appleNext = Math.max(Date.now(), appleNext) + 3200;
+  if (wait > 0) await new Promise(r => setTimeout(r, wait));
+  const url = `https://itunes.apple.com/search?${new URLSearchParams({ term, entity: 'ebook', limit: 15, country })}`;
+  const res = await fetch(url);
+  if (!res.ok) throw Object.assign(new Error(`Apple said ${res.status}`), { status: res.status });
+  const text = await res.text();
+  return text ? (JSON.parse(text).results || []) : [];
+}
+
+/** Loose comparison key: no subtitle, series note, leading article or punctuation. */
+function coverKey(s) {
+  s = (s || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  s = s.replace(/\(.*?\)|\[.*?\]/g, '').split(/:| - |, or /)[0].trim().replace(/^(the|a|an) /, '');
+  return s.replace(/[^a-z0-9]/g, '');
+}
+function surnameKey(author) {
+  const parts = (author || '').replace(/^(edited by|dr\.?|by) /i, '').trim().split(/\s+/);
+  return coverKey(parts[parts.length - 1] || '');
+}
+function appleArt(r) { return (r.artworkUrl100 || '').replace('100x100bb', '600x900bb'); }
+
+/** Apple Books results that really are this book: same title and the author's surname. */
+async function appleMatches(title, author, { all = false } = {}) {
+  const want = coverKey(title), sur = surnameKey(author);
+  const out = [];
+  for (const country of ['au', 'us', 'gb']) {
+    for (const term of [`${title} ${author || ''}`.trim(), title]) {
+      const results = await appleSearch(term, country);
+      for (const r of results) {
+        const t = coverKey(r.trackName), a = coverKey(r.artistName);
+        const sameTitle = t === want || (want.length > 6 && t.startsWith(want));
+        if (sameTitle && (!sur || a.includes(sur)) && r.artworkUrl100) out.push({ url: appleArt(r), label: r.trackName, country });
+      }
+      if (out.length && !all) return out;
+    }
+    if (out.length) return out;
+  }
+  return out;
+}
+
+async function appleCover(book) {
+  const found = await appleMatches(book.title, book.authors[0]);
+  return found[0] ? found[0].url : null;
+}
+
 function setCover(book, id) {
   book.coverId = id;
   book.cover = coverUrl(id);
@@ -288,14 +340,14 @@ async function enrichBook(book) {
 function needsLookup(b) {
   if ((b.lookupTries || 0) >= 3) return false;
   // Unlooked-up books, and (once per change of rules) every book whose cover she hasn't chosen herself.
-  return !b.enriched || (b.coverV !== COVER_RULES && !b.coverPick && (!!b.olKey || !b.coverId));
+  return !b.enriched || (b.coverV !== COVER_RULES && !b.coverPick);
 }
 
 /** Background queue so a big import doesn't hammer Open Library. */
 const Enricher = {
   running: false,
   async run(onProgress) {
-    if (this.running) return;
+    if (this.running) { this.again = true; return; }
     this.running = true;
     try {
       // New imports need looking up; older books may need their cover swapped for an English one.
@@ -303,8 +355,16 @@ const Enricher = {
       let done = 0, failed = 0;
       for (const book of todo) {
         try {
+          // Details (pages, series, subjects) still come from Open Library.
           if (!book.enriched || !book.olKey) await enrichBook(book);
-          else await Api.recheckCover(book);
+          // The cover: Apple Books first, then Open Library's English editions.
+          if (!book.coverPick && !book.appleTried) {
+            const url = await appleCover(book);
+            book.appleTried = true;
+            if (url) { book.coverApple = url; book.coverAt = Date.now(); }
+          }
+          if (!book.coverApple && !book.coverPick && book.coverV !== COVER_RULES && book.olKey) await Api.recheckCover(book);
+          book.coverV = COVER_RULES;
           book.lookupTries = 0;
         } catch (e) {
           // Open Library is often slow; try again on a later visit, giving up after three goes.
@@ -321,6 +381,7 @@ const Enricher = {
       Store.save();
     } finally {
       this.running = false;
+      if (this.again) { this.again = false; this.run(onProgress); }
     }
   }
 };

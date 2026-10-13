@@ -170,10 +170,11 @@ function formatBadge(b) {
   return formatOf(b) === 'audio' ? `<span class="fmt-badge" title="Audiobook">${ICONS.audio}</span>` : '';
 }
 
-/** Covers to try, best first: one she chose, then the checked English cover, then her own edition's. */
+/** Covers to try, best first: one she chose, Apple Books', Open Library's English one, her own edition's. */
 function coverSources(b) {
   const out = [];
-  if (b.coverPick) out.push(coverUrl(b.coverPick));
+  if (b.coverPick) out.push(typeof b.coverPick === 'string' ? b.coverPick : coverUrl(b.coverPick));
+  if (b.coverApple) out.push(b.coverApple);
   if (b.coverId) out.push(coverUrl(b.coverId));
   else if (b.cover) out.push(b.cover);
   // Her own edition's cover, by ISBN, as a backup if the checked cover won't load.
@@ -483,7 +484,7 @@ function openBook(id) {
       <button class="close" data-action="close-modal" aria-label="Close">✕</button>
       <div class="modal-grid">
         <div class="modal-cover-col">${coverHTML(b, 'modal-cover')}
-          ${b.olKey && !b.olKey.startsWith('series:') ? `<button class="link small" id="change-cover">Change cover</button>` : ''}</div>
+          <button class="link small" id="change-cover">Change cover</button></div>
         <div>
           <p class="eyebrow status-pill">${{ want: 'Up next', reading: formatOf(b) === 'audio' ? 'Listening now' : 'Reading now', read: 'Read', dnf: 'Set aside' }[b.status]}${finishedReads(b).length > 1 ? ` · read ${finishedReads(b).length}×` : ''}</p>
           <h2>${esc(b.title)}</h2>
@@ -545,25 +546,30 @@ function openBook(id) {
   const change = $('#change-cover', m);
   if (change) change.onclick = async () => {
     const box = $('#cover-choices', m);
-    box.innerHTML = loadingHTML('Finding English editions…');
-    try {
-      const covers = await Api.englishCovers(b.olKey);
-      if (m.dataset.id !== id) return;
-      box.innerHTML = covers.length ? `<div class="cover-choices">
-          <p class="small muted">Pick the edition you know. English print and ebook editions only, newest first.</p>
-          <div class="choice-grid">${covers.map(c => `<button class="choice" data-cover="${c.id}" title="${esc([c.publisher, c.year].filter(Boolean).join(', '))}">
-            <img src="${coverUrl(c.id, 'S').replace('-S.', '-M.')}" alt="" loading="lazy" onload="if (this.naturalWidth < 10) this.parentNode.remove()" onerror="this.parentNode.remove()">
-            <span>${esc(c.year)}</span></button>`).join('')}</div></div>`
-        : '<p class="small muted">Open Library has no other English covers for this book.</p>';
-      $$('.choice', box).forEach(btn => btn.onclick = () => {
-        b.coverPick = +btn.dataset.cover;
-        Store.save();
-        toast('Cover changed');
-        openBook(id);
-      });
-    } catch (e) {
-      box.innerHTML = `<p class="small muted">Couldn't reach Open Library just now. Try again in a moment.</p>`;
-    }
+    box.innerHTML = loadingHTML('Finding covers from Apple Books and Open Library…');
+    // Ask both catalogues; either one failing just means fewer choices.
+    const [apple, ol] = await Promise.all([
+      appleMatches(b.title, b.authors[0], { all: true }).catch(() => []),
+      b.olKey ? Api.englishCovers(b.olKey).catch(() => []) : []
+    ]);
+    if (m.dataset.id !== id) return;
+    const choices = [
+      ...[...new Map(apple.map(c => [c.url, c])).values()].map(c => ({ pick: c.url, src: c.url, label: 'Apple Books' })),
+      ...ol.map(c => ({ pick: String(c.id), src: coverUrl(c.id), label: c.year || 'Open Library' }))
+    ];
+    box.innerHTML = choices.length ? `<div class="cover-choices">
+        <p class="small muted">Pick the one you know. Apple Books covers first, then English editions from Open Library.</p>
+        <div class="choice-grid">${choices.map(c => `<button class="choice" data-pick="${esc(c.pick)}">
+          <img src="${esc(c.src)}" alt="" loading="lazy" onload="if (this.naturalWidth < 10) this.parentNode.remove()" onerror="this.parentNode.remove()">
+          <span>${esc(c.label)}</span></button>`).join('')}</div></div>`
+      : '<p class="small muted">Neither Apple Books nor Open Library has a cover for this book.</p>';
+    $$('.choice', box).forEach(btn => btn.onclick = () => {
+      const v = btn.dataset.pick;
+      b.coverPick = /^\d+$/.test(v) ? +v : v; // Open Library cover id, or an Apple image address
+      Store.save();
+      toast('Cover changed');
+      openBook(id);
+    });
   };
   const narr = $('#narrator', m);
   if (narr) narr.onchange = e => { b.narrator = e.target.value.trim(); Store.save(); };
@@ -1002,10 +1008,10 @@ function renderSettings(main) {
         <h3 class="section-title">Housekeeping</h3>
         <p class="small muted">App version ${esc(window.APP_VERSION || 'dev')}</p>
         <p class="small">${Store.books.length} books in total. ${unenriched ? `${unenriched} still need covers and details.` : 'All books have been looked up.'}
-          “Refresh all covers” looks every book up again and switches it to an English edition's cover. Covers you picked yourself stay as they are.</p>
+          “Find missing covers” looks again for any book still showing a plain coloured cover. To swap a cover you don't like, open the book and tap Change cover.</p>
         <div class="progress"><div id="enrich-bar"></div></div><p class="small muted" id="enrich-text"></p>
         <div class="btn-row">
-          <button class="btn" id="re-enrich">Refresh all covers</button>
+          <button class="btn" id="re-enrich">Find missing covers</button>
           <button class="btn ghost danger" id="wipe">Erase everything</button>
         </div>
       </div>
@@ -1038,15 +1044,18 @@ function renderSettings(main) {
     } catch (err) { toast(err.message); }
   };
   $('#re-enrich').onclick = () => {
+    // Only books still without a cover; finished work is never thrown away.
     Store.books.forEach(b => {
+      if (b.coverPick || b.coverApple || b.coverId) return;
       b.lookupTries = 0;
-      if (!b.olKey || !b.coverId) b.enriched = false; // never matched: search again from scratch
-      if (!b.coverPick) b.coverV = 0;
+      b.appleTried = false;
+      b.coverV = 0;
+      if (!b.olKey) b.enriched = false;
     });
     Store.save();
     renderSettings(main);
     runEnricher();
-    toast('Refreshing covers. This takes a few minutes for a big library.');
+    toast('Looking for missing covers. Keep the app open until the progress line disappears.');
   };
   $('#wipe').onclick = () => {
     if (confirm('Erase your entire library? Download a backup first if you might want it back.') && confirm('Really erase everything?')) {
