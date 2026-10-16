@@ -127,9 +127,18 @@ function normaliseBook(b) {
 /** The parts of a book only its owner changes. Looked-up details (covers,
     subjects, series…) are left out so a background look-up never counts
     as an edit that could outvote a real change made on another device. */
-const OWNER_FIELDS = ['title', 'authors', 'status', 'rating', 'reads', 'notes', 'pages', 'format', 'narrator', 'coverPick'];
+const OWNER_FIELDS = ['title', 'authors', 'status', 'rating', 'reads', 'notes', 'pages', 'format', 'narrator', 'coverPick', 'titleOk'];
 function bookFingerprint(b) {
   return JSON.stringify(OWNER_FIELDS.map(k => b[k] ?? null));
+}
+
+/** Does a title look like a non-English edition's? (Accented letters, or common foreign little words.) */
+function looksForeign(t) {
+  t = t || '';
+  if (/[åäöøæßğışœ]/i.test(t)) return true;
+  if ((t.match(/[^\x00-\x7F’‘“”–—…]/g) || []).length >= 2) return true;
+  return /\b(der|die|das|und|ein|eine|meine|mein|fürs|für|leben|nicht|unsere|el|los|las|del|una|uno|hombre|llamado|gente|mis|sus|une|les|des|sur|avec|pour|dans|och|som|heter|mitt|mina|meus|minha|amigos|het|een|zijn|niet|il|della|gli|sono|ich|wir|hier)\b/i.test(t)
+    && !/\b(the|of|and|a|an|in|to|for|with)\b/i.test(t);
 }
 
 function normTitle(t) {

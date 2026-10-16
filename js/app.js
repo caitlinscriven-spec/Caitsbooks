@@ -364,7 +364,7 @@ function renderFind(main) {
     <section class="intro">
       <p class="eyebrow">Ask at the counter</p>
       <h2>Find a book</h2>
-      <p>Search by title, author or ISBN. Covers, page counts and series come from Open Library.</p>
+      <p>Search by title or author. Results come from Apple Books' Australian store (new releases included), with Open Library filling gaps.</p>
     </section>
     <form id="search-form" class="search-bar">
       <input type="search" id="q" placeholder="e.g. A Court of Thorns and Roses" value="${esc(ui.lastQuery)}" autocomplete="off">
@@ -377,15 +377,43 @@ function renderFind(main) {
     if (!q) return;
     ui.lastQuery = q;
     $('#results').innerHTML = loadingHTML('Checking the catalogue…');
-    try {
-      ui.searchResults = await Api.search(q);
-      drawResults();
-    } catch (err) {
-      $('#results').innerHTML = `<p class="muted">Couldn't reach Open Library just now (${esc(err.message)}). Try again in a moment.</p>`;
+    const results = await findBooks(q);
+    if (ui.lastQuery !== q) return; // a newer search has started
+    if (!results) {
+      $('#results').innerHTML = `<p class="muted">Couldn't reach Apple Books or Open Library just now. Try again in a moment.</p>`;
+      return;
     }
+    ui.searchResults = results;
+    drawResults();
   };
   if (ui.searchResults) drawResults();
   $('#q').focus();
+}
+
+/** Search Apple Books (what's sold in Australia) and Open Library together, Apple first.
+    Open Library adds series and page counts where it has the same book, and fills gaps,
+    but its foreign-titled entries are left out. Returns null if both fail. */
+async function findBooks(q) {
+  const [apple, ol] = await Promise.allSettled([
+    appleSearch(q, 'au', { limit: 25 }),
+    Api.search(q, 20)
+  ]);
+  if (apple.status === 'rejected' && ol.status === 'rejected') return null;
+  const key = c => normTitle(c.title) + '|' + surnameKey(c.authors[0]);
+  const junk = /summary of|study guide|workbook|sampler|box(ed)? set|collection|supersummary|bookhabits/i;
+  const olBooks = ol.status === 'fulfilled' ? ol.value.filter(b => !b.foreign && b.authors.length && !junk.test(b.title + ' ' + b.authors.join(' '))) : [];
+  const olByKey = new Map(olBooks.map(b => [key(b), b]));
+  const out = [], seen = new Set();
+  for (const r of apple.status === 'fulfilled' ? apple.value : []) {
+    const c = appleCandidate(r);
+    if (junk.test((r.trackName || '') + ' ' + (r.artistName || ''))) continue;
+    if (seen.has(key(c))) continue;
+    seen.add(key(c));
+    const match = olByKey.get(key(c));
+    out.push(match ? { ...c, olKey: match.olKey, pages: match.pages, series: match.series, subjects: match.subjects, coverId: match.coverId } : c);
+  }
+  for (const b of olBooks) if (!seen.has(key(b))) { seen.add(key(b)); out.push(b); }
+  return out.slice(0, 30);
 }
 
 function drawResults() {
@@ -509,6 +537,11 @@ function openBook(id) {
           <div class="btn-row">${actions}</div>
         </div>
       </div>
+      ${looksForeign(b.title) && !b.titleOk ? `<div class="english-fix" id="english-fix">
+        <p><strong>Is this the English edition?</strong> “${esc(b.title)}” looks like a translated title.
+        <button class="link" id="find-english">Show ${esc(b.authors[0] || 'the author')}'s books in English</button>
+        · <button class="link" id="title-ok">It's fine</button></p>
+        <div id="english-choices"></div></div>` : ''}
       <div id="cover-choices"></div>
       <div id="next-in-series"></div>
       <div class="desc" id="desc"></div>
@@ -580,6 +613,31 @@ function openBook(id) {
       b.coverPick = /^\d+$/.test(v) ? +v : v; // Open Library cover id, or an Apple image address
       Store.save();
       toast('Cover changed');
+      openBook(id);
+    });
+  };
+  const titleOk = $('#title-ok', m);
+  if (titleOk) titleOk.onclick = () => { b.titleOk = true; Store.save(); openBook(id); };
+  const findEnglish = $('#find-english', m);
+  if (findEnglish) findEnglish.onclick = async () => {
+    const box = $('#english-choices', m);
+    box.innerHTML = loadingHTML('Looking in Apple Books…');
+    let found = [];
+    try {
+      const sur = surnameKey(b.authors[0]);
+      found = (await appleSearch(b.authors[0], 'au', { attribute: 'authorTerm', limit: 40 }))
+        .filter(r => coverKey(r.artistName).includes(sur)).map(appleCandidate)
+        .filter(c => !looksForeign(c.title) && !/summary of|box(ed)? set|collection/i.test(c.title));
+    } catch (e) { /* busy */ }
+    if (m.dataset.id !== id) return;
+    box.innerHTML = found.length ? `<p class="small muted">Tap the one you read. Your rating, dates and notes stay as they are.</p>
+      <div class="choice-grid">${found.map((c, i) => `<button class="choice" data-i="${i}"><img src="${esc(c.cover)}" alt="" loading="lazy"><span>${esc(c.title)}</span></button>`).join('')}</div>`
+      : '<p class="small muted">Apple Books is busy or has nothing for this author. Try again in a minute.</p>';
+    $$('.choice', box).forEach(btn => btn.onclick = () => {
+      const c = found[+btn.dataset.i];
+      Object.assign(b, { title: c.title, coverApple: c.coverApple, genres: c.genres, appleTried: true, genresTried: true, year: c.year || b.year, coverAt: Date.now() });
+      Store.save();
+      toast(`Now “${c.title}”`);
       openBook(id);
     });
   };
@@ -924,13 +982,13 @@ async function authorPicks(name, ok, onWait, minYear = 0) {
   const appleByTitle = new Map(fromApple.map(c => [normTitle(c.title), c]));
   const popular = ol
     .filter(b => sameAuthor(b.authors[0] || '') && !(b.series && b.series.position > 1)) // their own book, not one they contributed to
-    .map(b => appleByTitle.get(normTitle(b.title)) || (b.coverId ? { ...b, recKey: 'ol:' + b.olKey } : null))
+    .map(b => appleByTitle.get(normTitle(b.title)) || (b.coverId && !b.foreign ? { ...b, recKey: 'ol:' + b.olKey } : null))
     .filter(Boolean);
   const rest = fromApple.filter(c => !popular.includes(c));
   return [...popular, ...rest]
     .filter(c => !later.has(normTitle(c.title)))
     .filter(c => !/\buntitled\b|^(tbc|tba|title tbc)\b/i.test(c.title))
-    .filter(c => (c.title.match(/[^\x00-\x7F’‘“”–—…]/g) || []).length < 2 && !/[åäöøæß]/i.test(c.title)) // a foreign edition's title
+    .filter(c => !looksForeign(c.title)) // a foreign edition's title
     .filter(c => !minYear || !c.year || c.year >= minYear) // a namesake from another century
     .filter(ok);
 }

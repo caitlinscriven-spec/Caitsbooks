@@ -563,3 +563,6 @@ span.chip { cursor: default; }
 .reread-choice { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .reread-choice .btn { display: inline-flex; align-items: center; gap: 6px; }
 .taste-now { font-size: 1.05rem; max-width: 60ch; }
+.english-fix { margin-top: 16px; padding: 12px 16px; border-radius: var(--radius); background: var(--paper-deep); }
+.english-fix p { margin: 0 0 6px; }
+.choice span { white-space: normal; line-height: 1.2; }

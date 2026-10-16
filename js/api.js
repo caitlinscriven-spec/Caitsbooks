@@ -7,7 +7,7 @@ const OL_FIELDS = [
   'key', 'title', 'author_name', 'number_of_pages_median', 'cover_i', 'first_publish_year',
   'subject', 'isbn', 'series_name', 'series_key', 'series_position', 'ratings_average', 'ratings_count',
   // the best-matching English edition, for an English cover
-  'editions', 'editions.cover_i', 'editions.language', 'editions.format', 'editions.publisher'
+  'editions', 'editions.cover_i', 'editions.language', 'editions.format', 'editions.publisher', 'editions.title'
 ].join(',');
 
 // Subjects that say nothing about taste.
@@ -78,11 +78,15 @@ function englishCover(d) {
 /** Turn an Open Library search doc into our book shape (not yet saved). */
 function docToBook(d) {
   const english = englishCover(d);
+  // Open Library often files a translated book under its original title; prefer an English edition's title.
+  const ed = d.editions && d.editions.docs && d.editions.docs[0];
+  const englishTitle = ed && ed.title && (ed.language || []).includes('eng') ? ed.title : null;
   const cover = english || d.cover_i || null;
   const pos = d.series_position && d.series_position[0];
   return {
     olKey: d.key,
-    title: d.title,
+    title: englishTitle || d.title,
+    foreign: !englishTitle && looksForeign(d.title),
     authors: d.author_name || [],
     pages: d.number_of_pages_median || null,
     coverId: cover,

@@ -4,7 +4,7 @@ A personal book tracker dressed as an independent bookshop: an oxblood-and-gold 
 
 ## What it does
 
-- **Find a book**: search Open Library by title, author or ISBN. It fills in author, page count, cover, year and series position.
+- **Find a book**: searches Apple Books' Australian store (so new releases show up) and Open Library together, Apple first. Open Library adds series and page counts and fills gaps, but entries filed under a foreign-language title are left out. A book already in your library whose title looks translated offers a one-tap swap to the English edition.
 - **Track reading**: *To read → Reading → Finished*, plus *Did not finish*. Any book you've read can be re-read or re-listened to (from its card, or from Find a book); a re-read counts toward that year's stats and keeps your original rating. Every read keeps its own dates and format.
 - **Quarter-star ratings**: tap the left or right part of a star for ¼, ½, ¾ or a full star. Arrow keys work too.
 - **The shop**: what you're reading sits on the counter, your highest-rated books are staff picks with your own shelf-talker notes, recent reads are new arrivals, and everything you've read is a wall of covers you can search and sort.
