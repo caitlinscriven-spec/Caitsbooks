@@ -566,3 +566,8 @@ span.chip { cursor: default; }
 .english-fix { margin-top: 16px; padding: 12px 16px; border-radius: var(--radius); background: var(--paper-deep); }
 .english-fix p { margin: 0 0 6px; }
 .choice span { white-space: normal; line-height: 1.2; }
+.by-hand { margin-top: 28px; padding: 14px 20px; }
+.by-hand summary { cursor: pointer; }
+.hand-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 0 14px; align-items: end; margin-top: 8px; }
+.hand-form #hand-rating-wrap { grid-column: 1 / -1; margin: 6px 0; }
+.hand-form .btn { justify-self: start; margin: 10px 0; }

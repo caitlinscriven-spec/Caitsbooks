@@ -370,7 +370,20 @@ function renderFind(main) {
       <input type="search" id="q" placeholder="e.g. A Court of Thorns and Roses" value="${esc(ui.lastQuery)}" autocomplete="off">
       <button class="btn primary">Search</button>
     </form>
-    <div id="results"></div>`;
+    <div id="results"></div>
+    <details class="panel by-hand" id="by-hand">
+      <summary><strong>Can't find it?</strong> Add it by hand. Useful for Kindle First Reads and other Amazon-only books.</summary>
+      <form id="hand-form" class="hand-form">
+        <label>Title <input id="hand-title" required></label>
+        <label>Author <input id="hand-author" required></label>
+        <label>Pages <input id="hand-pages" type="number" min="1" placeholder="optional"></label>
+        <label>Format <select id="hand-format"><option value="ebook">Ebook</option><option value="print">Print</option><option value="audio">Audiobook</option></select></label>
+        <label>Where does it go? <select id="hand-status"><option value="read">I've read it</option><option value="reading">Reading it now</option><option value="want">Up next</option></select></label>
+        <label id="hand-date-wrap">Finished on <input id="hand-date" type="date"></label>
+        <div id="hand-rating-wrap"><span class="small muted">My rating</span><div id="hand-rating"></div></div>
+        <button class="btn primary">Add to my library</button>
+      </form>
+    </details>`;
   $('#search-form').onsubmit = async e => {
     e.preventDefault();
     const q = $('#q').value.trim();
@@ -386,6 +399,7 @@ function renderFind(main) {
     ui.searchResults = results;
     drawResults();
   };
+  wireHandForm();
   if (ui.searchResults) drawResults();
   $('#q').focus();
 }
@@ -416,9 +430,49 @@ async function findBooks(q) {
   return out.slice(0, 30);
 }
 
+/** Adding a book no catalogue has: everything typed in, nothing looked up. */
+function wireHandForm() {
+  let rating = 0;
+  $('#hand-date').value = today();
+  $('#hand-rating').appendChild(starPicker(0, v => { rating = v; }));
+  const showFor = () => {
+    const st = $('#hand-status').value;
+    $('#hand-date-wrap').hidden = st !== 'read';
+    $('#hand-rating-wrap').hidden = st !== 'read';
+  };
+  $('#hand-status').onchange = showFor;
+  showFor();
+  $('#hand-form').onsubmit = e => {
+    e.preventDefault();
+    const status = $('#hand-status').value, format = $('#hand-format').value;
+    const book = Store.add({
+      title: $('#hand-title').value.trim(),
+      authors: [$('#hand-author').value.trim()],
+      pages: parseInt($('#hand-pages').value, 10) || null,
+      status, format,
+      rating: status === 'read' ? rating : 0,
+      reads: status === 'read' ? [{ start: null, end: $('#hand-date').value || today(), format }]
+        : status === 'reading' ? [{ start: today(), end: null, format }] : [],
+      year: new Date().getFullYear(),
+      handAdded: true,
+      enriched: false // if a catalogue lists it later, the background look-up fills in the cover and details
+    });
+    toast(`“${book.title}” is in your library`);
+    if (needsLookup(book)) runEnricher();
+    $('#hand-form').reset();
+    $('#by-hand').open = false;
+    openBook(book.id);
+  };
+}
+
 function drawResults() {
   const el = $('#results');
-  if (!ui.searchResults.length) { el.innerHTML = `<p class="muted">No books found. Try fewer words, or add the author's name.</p>`; return; }
+  if (!ui.searchResults.length) {
+    el.innerHTML = `<p class="muted">No books found. Try fewer words, or add the author's name. Still nothing? Add it by hand below.</p>`;
+    $('#by-hand').open = true;
+    if (!$('#hand-title').value) $('#hand-title').value = ui.lastQuery;
+    return;
+  }
   el.innerHTML = `<div class="card-grid">${ui.searchResults.map((r, i) => resultCard(r, i, 'search')).join('')}</div>`;
 }
 
