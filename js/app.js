@@ -21,6 +21,7 @@ const ui = {
 
 document.addEventListener('DOMContentLoaded', () => {
   Store.load();
+  applyFixes();
   Sync.init();
   $('#owner-name').textContent = Store.data.settings.name || 'Caitlin';
   window.addEventListener('hashchange', route);
@@ -33,6 +34,30 @@ document.addEventListener('DOMContentLoaded', () => {
     if (rated >= 3 && !RecBuild.fresh() && !RecBuild.running) RecBuild.start().catch(() => {});
   }, 8000);
 });
+
+/** One-off tidy-ups Caitlin asked for (27 Oct 2026). Safe to run again: each only changes what still needs it,
+    so it also catches up a device whose copy of the library arrives later by sync. */
+function applyFixes() {
+  if (today() > '2026-12-31') return;
+  let changed = false;
+  for (const b of Store.books) {
+    const backman = (b.authors[0] || '').includes('Backman');
+    if (backman && b.title === 'Mina vänner') { b.title = 'My Friends'; b.titleOk = true; changed = true; }
+    if (b.title === 'Serpent and the Wings of Night - Special Launch Edition') { b.title = 'Serpent and the Wings of Night'; changed = true; }
+    // Shelved from her picks with "Already read", which stamped them as finished that day. They were read long ago.
+    if (['Tomorrow, and Tomorrow, and Tomorrow', 'Hello Beautiful', 'In the Likely Event'].includes(b.title) || b.title.startsWith('Serpent and the Wings of Night')) {
+      const before = b.reads.length;
+      b.reads = b.reads.filter(r => !(r.end === '2026-10-27' && !r.start)); // undated, like her imported history
+      if (b.reads.length !== before) changed = true;
+    }
+  }
+  if (!Store.byId('fix-beartown') && !Store.data.deleted['fix-beartown'] && !Store.findMatch({ title: 'Beartown', authors: ['Fredrik Backman'] })) {
+    Store.data.books.push(normaliseBook({ id: 'fix-beartown', title: 'Beartown', authors: ['Fredrik Backman'], status: 'read', rating: 5,
+      reads: [], enriched: false }));
+    changed = true;
+  }
+  if (changed) Store.save();
+}
 
 function route() {
   const v = (location.hash || '#library').slice(1);
@@ -532,13 +557,14 @@ function addResult(idx, as, src) {
     ...structuredClone(r),
     status: as,
     enriched: !!r.olKey, // picks from Apple Books get their details looked up in the background
-    reads: as === 'reading' ? [{ start: today(), end: null, format: 'print' }] : as === 'read' ? [{ start: null, end: today(), format: 'print' }] : []
+    // A pick she's "already read" was read some time ago, so it goes on the shelf undated; a search result is usually just finished.
+    reads: as === 'reading' ? [{ start: today(), end: null, format: 'print' }] : as === 'read' && src !== 'recs' ? [{ start: null, end: today(), format: 'print' }] : []
   });
   if (needsLookup(book)) runEnricher();
   if (as === 'read') {
     render();
     openBook(book.id);
-    toast('Shelved. Give it a rating, and fix the date if you need to.');
+    toast(src === 'recs' ? 'Shelved, with no date. Give it a rating.' : 'Shelved. Give it a rating, and fix the date if you need to.');
   } else {
     toast(as === 'want' ? `“${book.title}” is up next` : `“${book.title}” is on the counter`);
     render();

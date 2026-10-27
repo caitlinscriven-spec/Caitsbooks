@@ -63,6 +63,7 @@ const Sync = {
           Store.replace(Object.assign(merged, { recCache: Store.data.recCache }));
           Store.resnap();
           Store.saveLocal();
+          if (typeof applyFixes === 'function') applyFixes();
           if (typeof render === 'function') render();
         }
         if (remote.data && canonical(merged) === canonical(remote.data)) break;
