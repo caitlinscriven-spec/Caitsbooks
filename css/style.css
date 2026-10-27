@@ -571,3 +571,8 @@ span.chip { cursor: default; }
 .hand-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 0 14px; align-items: end; margin-top: 8px; }
 .hand-form #hand-rating-wrap { grid-column: 1 / -1; margin: 6px 0; }
 .hand-form .btn { justify-self: start; margin: 10px 0; }
+.about { margin-top: 8px; font-size: .86rem; }
+.about summary { cursor: pointer; color: var(--rose-ink); }
+.about .blurb { white-space: pre-line; color: var(--ink-soft); margin: 8px 0; max-height: 14em; overflow: auto; }
+.about .blurb:empty { display: none; }
+.look-up a { white-space: nowrap; }

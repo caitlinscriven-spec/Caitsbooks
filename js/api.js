@@ -357,6 +357,7 @@ function needsLookup(b) {
 /** Background queue so a big import doesn't hammer Open Library. */
 const Enricher = {
   running: false,
+  paused: false, // set while recommendations are being built, so they get Apple Books to themselves
   async run(onProgress) {
     if (this.running) { this.again = true; return; }
     this.running = true;
@@ -365,6 +366,7 @@ const Enricher = {
       const todo = Store.books.filter(needsLookup);
       let done = 0, failed = 0;
       for (const book of todo) {
+        while (this.paused) await new Promise(r => setTimeout(r, 500));
         try {
           // Details (pages, series, subjects) still come from Open Library.
           if (!book.enriched || !book.olKey) await enrichBook(book);

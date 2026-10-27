@@ -27,6 +27,11 @@ document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('click', onClick);
   route();
   if (Store.books.some(needsLookup)) runEnricher();
+  // Have picks ready before she opens For You: build them quietly a little after the app opens.
+  setTimeout(() => {
+    const rated = Store.books.filter(b => b.rating && b.status === 'read').length;
+    if (rated >= 3 && !RecBuild.fresh() && !RecBuild.running) RecBuild.start().catch(() => {});
+  }, 8000);
 });
 
 function route() {
@@ -474,6 +479,7 @@ function drawResults() {
     return;
   }
   el.innerHTML = `<div class="card-grid">${ui.searchResults.map((r, i) => resultCard(r, i, 'search')).join('')}</div>`;
+  wireAbout(el);
 }
 
 function resultCard(r, i, src, extra = '') {
@@ -488,6 +494,11 @@ function resultCard(r, i, src, extra = '') {
       ${r.series ? `<p class="badge">${esc(r.series.name)}${r.series.position != null ? ' #' + r.series.position : ''}</p>` : ''}
       ${r.communityRating ? `<p class="small muted">Others: ${r.communityRating}★</p>` : ''}
       ${extra}
+      <details class="about" data-key="${esc(r.recKey || r.olKey || r.title)}" data-ol="${esc(r.olKey || '')}">
+        <summary>About this book</summary>
+        <p class="blurb">${r.description ? esc(r.description) : ''}</p>
+        <p class="small">${lookItUp(r)}</p>
+      </details>
       ${existing ? `<p class="owned" data-action="open" data-id="${existing.id}">✓ ${statusLabel}</p>
       ${existing.status === 'read' ? `<div class="btn-row">
         <button class="btn small" data-action="reread" data-fmt="print" data-id="${existing.id}">Re-read</button>
@@ -495,10 +506,22 @@ function resultCard(r, i, src, extra = '') {
       <div class="btn-row">
         <button class="btn small" data-action="add-result" data-idx="${i}" data-as="want" data-src="${src}">Up next</button>
         <button class="btn small" data-action="add-result" data-idx="${i}" data-as="reading" data-src="${src}">Reading</button>
-        <button class="btn small" data-action="add-result" data-idx="${i}" data-as="read" data-src="${src}">Read it</button>
+        <button class="btn small" data-action="add-result" data-idx="${i}" data-as="read" data-src="${src}">Already read</button>
       </div>`}
     </div>
   </article>`;
+}
+
+/** Fill in a blurb from Open Library the first time "About this book" is opened, if Apple didn't give one. */
+function wireAbout(root) {
+  $$('details.about', root).forEach(d => d.addEventListener('toggle', async () => {
+    const p = $('.blurb', d);
+    if (!d.open || p.textContent.trim() || !d.dataset.ol || d.dataset.loaded) return;
+    d.dataset.loaded = '1';
+    p.textContent = 'Fetching the blurb…';
+    const text = await Api.description(d.dataset.ol).catch(() => '');
+    p.textContent = text || 'No blurb available. Try the links below.';
+  }));
 }
 
 function addResult(idx, as, src) {
@@ -584,6 +607,7 @@ function openBook(id) {
           <h2>${esc(b.title)}</h2>
           <p class="byline">${esc(b.authors.join(', ') || 'Unknown author')}</p>
           <p class="small muted">${[b.year, b.pages && b.pages + ' pages'].filter(Boolean).join(' · ')}</p>
+          <p class="small">${lookItUp(b)}</p>
           ${b.series ? `<p class="badge">${esc(b.series.name)}${b.series.position != null ? ' #' + b.series.position : ''}</p>` : ''}
           <div class="rating-block" id="rating-slot"></div>
           <div>${formatPicker(b)}</div>
@@ -1009,18 +1033,23 @@ const appleState = { busyCount: 0 };
 async function authorPicks(name, ok, onWait, minYear = 0) {
   const sur = surnameKey(name);
   // Open Library sorted by how many readers have shelved each book: the books people actually start with.
-  const olPromise = Api.searchBy({ author: name, sort: 'readinglog', limit: 40 }).catch(() => []);
-  let apple = null;
-  if (appleState.busyCount < 2) {
+  const olCached = cacheGet('ol:' + similarKey(name));
+  const olPromise = olCached ? Promise.resolve(olCached)
+    : Api.searchBy({ author: name, sort: 'readinglog', limit: 40 })
+      .then(list => { cacheSet('ol:' + similarKey(name), list.map(({ subjects, ...b }) => b)); return list; })
+      .catch(() => []);
+  let apple = cacheGet('apple:' + similarKey(name));
+  if (!apple && appleState.busyCount < 2) {
     try {
-      apple = await appleSearch(name, 'au', { attribute: 'authorTerm', limit: 25 });
+      apple = (await appleSearch(name, 'au', { attribute: 'authorTerm', limit: 25 })).map(slimApple);
       appleState.busyCount = 0;
+      cacheSet('apple:' + similarKey(name), apple);
     } catch (e) {
       if (e.status === 429) {
         // Apple asked us to slow down: wait once, then fall back to Open Library if it's still busy.
         onWait && onWait();
         await new Promise(r => setTimeout(r, 45000));
-        try { apple = await appleSearch(name, 'au', { attribute: 'authorTerm', limit: 25 }); appleState.busyCount = 0; }
+        try { apple = (await appleSearch(name, 'au', { attribute: 'authorTerm', limit: 25 })).map(slimApple); appleState.busyCount = 0; cacheSet('apple:' + similarKey(name), apple); }
         catch (e2) { appleState.busyCount++; }
       }
     }
@@ -1065,18 +1094,83 @@ function appleCandidate(r) {
   const url = appleArt(r);
   return {
     recKey: 'apple:' + r.trackId,
-    title: (r.trackName || '').replace(/\s*[(\[].*?[)\]]\s*$/, '').replace(/:\s*a novel$/i, '').trim(),
+    title: (r.trackName || '').replace(/\s*[(\[].*?[)\]]\s*$/, '').replace(/:\s*a novel$/i, '').replace(/\s+[-–:]\s+[^-–:]*\bedition$/i, '').trim(),
     authors: [r.artistName],
     year: +(r.releaseDate || '').slice(0, 4) || null,
     cover: url, coverApple: url, appleTried: true,
     genres: appleGenres(r), genresTried: true,
     communityRating: r.averageUserRating || null,
     ratingsCount: r.userRatingCount || 0,
+    description: blurb(r.description),
+    appleUrl: r.trackViewUrl || null,
     subjects: [], series: null
   };
 }
 
+/** Apple's blurb as plain text, trimmed to a readable length. */
+function blurb(html) {
+  if (!html) return '';
+  const div = document.createElement('div');
+  div.innerHTML = html.replace(/<br\s*\/?>|<\/p>/gi, '\n');
+  const text = div.textContent.replace(/\n{3,}/g, '\n\n').trim();
+  return text.length > 900 ? text.slice(0, 900).replace(/\s+\S*$/, '') + '…' : text;
+}
+
+/** Links to read more about a book elsewhere. */
+function lookItUp(b) {
+  const q = encodeURIComponent(`${b.title} ${(b.authors || [])[0] || ''}`.trim());
+  return `<span class="look-up">Read more:
+    <a href="https://www.goodreads.com/search?q=${q}" target="_blank" rel="noopener">Goodreads</a> ·
+    <a href="https://www.amazon.com.au/s?k=${q}&i=stripbooks" target="_blank" rel="noopener">Amazon</a>${b.appleUrl ? ` ·
+    <a href="${esc(b.appleUrl)}" target="_blank" rel="noopener">Apple Books</a>` : ''}</span>`;
+}
+
+/* --- small caches so repeat builds don't ask Apple and Open Library the same things again --- */
+const LOOKUP_CACHE_KEY = 'caitsbooks.lookups';
+const LOOKUP_TTL = 14 * 864e5;
+function cacheGet(key) {
+  try {
+    const all = JSON.parse(localStorage.getItem(LOOKUP_CACHE_KEY) || '{}');
+    const hit = all[key];
+    return hit && Date.now() - hit.at < LOOKUP_TTL ? hit.value : null;
+  } catch (e) { return null; }
+}
+function cacheSet(key, value) {
+  try {
+    const all = JSON.parse(localStorage.getItem(LOOKUP_CACHE_KEY) || '{}');
+    all[key] = { at: Date.now(), value };
+    for (const [k, v] of Object.entries(all)) if (Date.now() - v.at > LOOKUP_TTL) delete all[k];
+    localStorage.setItem(LOOKUP_CACHE_KEY, JSON.stringify(all));
+  } catch (e) { /* full or blocked: just don't cache */ }
+}
+/** Only the Apple fields the shop uses, so the cache stays small. */
+function slimApple(r) {
+  return { trackId: r.trackId, trackName: r.trackName, artistName: r.artistName, artworkUrl100: r.artworkUrl100,
+    genres: r.genres, releaseDate: r.releaseDate, averageUserRating: r.averageUserRating,
+    userRatingCount: r.userRatingCount, trackViewUrl: r.trackViewUrl, description: (r.description || '').slice(0, 1500) };
+}
+
 let recList = [];
+
+/** One recommendations build at a time, shared by the For You page and the quiet background build. */
+const RecBuild = {
+  running: null, partial: null, status: '', listeners: new Set(),
+  fresh() { const c = Store.data.recCache; return c && c.v === 4 && Date.now() - c.at < 864e5 * 3; },
+  start() {
+    if (this.running) return this.running;
+    this.partial = null;
+    this.running = buildRecs(
+      (done, total, waiting) => { this.status = waiting ? `Apple Books is busy, so I'm waiting a minute… (${done} of ${total})` : `Still looking… ${done} of ${total}`; this.emit(); },
+      sections => { this.partial = sections; this.emit(); }
+    ).then(sections => {
+      Store.data.recCache = { v: 4, at: Date.now(), sections };
+      Store.save();
+      return sections;
+    }).finally(() => { this.running = null; this.emit(); });
+    return this.running;
+  },
+  emit() { this.listeners.forEach(fn => fn()); }
+};
 
 function renderRecs(main) {
   const rated = Store.books.filter(b => b.rating && b.status === 'read');
@@ -1092,24 +1186,30 @@ function renderRecs(main) {
       <button class="btn" id="refresh-recs">Fresh picks</button>
     </section>
     <div id="recs">${rated.length < 3 ? `<p class="muted">Rate at least three books (or import your history in <a href="#settings">Settings</a>) and I'll start suggesting.</p>` : loadingHTML('Asking around the shop…')}</div>`;
-  $('#refresh-recs').onclick = () => { Store.data.recCache = null; renderRecs(main); };
+  $('#refresh-recs').onclick = () => { if (RecBuild.running) return; Store.data.recCache = null; renderRecs(main); };
   if (rated.length < 3) return;
 
-  const cache = Store.data.recCache;
-  if (cache && cache.v === 3 && Date.now() - cache.at < 864e5 * 3) { drawRecs(cache.sections); return; }
-  buildRecs((done, total, waiting) => {
-    const el = $('#recs .loading');
-    if (el) el.textContent = waiting ? `Apple Books is busy, so I'm waiting a minute… (${done} of ${total})` : `Asking around the shop… ${done} of ${total}. This takes a minute or two.`;
-  }).then(sections => {
-    Store.data.recCache = { v: 3, at: Date.now(), sections };
-    Store.save();
-    if (ui.view === 'recs') drawRecs(sections);
-  }).catch(err => {
+  if (RecBuild.fresh() && !RecBuild.running) { drawRecs(Store.data.recCache.sections); return; }
+  // Show picks as they're found, and keep updating until the build finishes.
+  const update = () => {
+    if (ui.view !== 'recs') return;
+    if (RecBuild.running) {
+      if (RecBuild.partial && RecBuild.partial.some(s => s.items.length)) drawRecs(RecBuild.partial, RecBuild.status || 'Still looking…');
+      else { const el = $('#recs .loading'); if (el) el.textContent = RecBuild.status || 'Asking around the shop…'; }
+    } else if (Store.data.recCache) {
+      drawRecs(Store.data.recCache.sections);
+      RecBuild.listeners.delete(update);
+    }
+  };
+  RecBuild.listeners.clear();
+  RecBuild.listeners.add(update);
+  RecBuild.start().catch(err => {
     if (ui.view === 'recs') $('#recs').innerHTML = `<p class="muted">Couldn't finish looking (${esc(err.message)}). Tap “Fresh picks” to try again.</p>`;
   });
+  update();
 }
 
-async function buildRecs(progress) {
+async function buildRecs(progress, onPartial) {
   const read = Store.books.filter(b => b.status === 'read' || finishedReads(b).length);
   const prof = tasteProfile(read);
   const dismissed = new Set(Store.data.dismissed || []);
@@ -1177,33 +1277,34 @@ async function buildRecs(progress) {
   appleState.busyCount = 0;
   const total = seriesPlan.length + loved.length + kinPlan.length;
   let done = 0;
-  const tick = () => progress && progress(++done, total);
+  const byScore = (a, b) => (b.score || 0) - (a.score || 0);
+  const seriesRecs = [], authorRecs = [], kinRecs = [];
+  // Leave out anything she's tapped "not for me" on (or added) while the build was running.
+  const still = list => list.filter(c => !(Store.data.dismissed || []).includes(c.recKey || c.olKey) && !owned(c));
+  const sections = () => [
+    { title: 'Because of what you loved', items: roundRobin(still(kinRecs).sort(byScore), c => c.seed).slice(0, 12) },
+    { title: 'Next in a series you’re enjoying', items: still(seriesRecs) },
+    { title: 'More from authors you adore', items: still(authorRecs).sort(byScore).slice(0, 12) }
+  ];
+  const tick = () => { progress && progress(++done, total); onPartial && onPartial(sections()); };
   const busy = () => progress && progress(done, total, true);
 
-  const seriesRecs = [];
-  for (const g of seriesPlan) {
-    const furthest = g.list.slice().sort((a, b) => (b.series.position || 0) - (a.series.position || 0))[0];
-    try {
-      const next = await loadNextInSeries(furthest);
-      const c = next && { ...next, recKey: 'series:' + normTitle(next.title) };
-      if (c && ok(c)) seriesRecs.push({ ...c, why: `Next in ${furthest.series.name}. You gave the series ${fmtRating(Math.round(g.avg * 4) / 4)}★.` });
-    } catch (e) { /* skip */ }
-    tick();
-  }
+  // Series only need Open Library, so they're looked up alongside the Apple Books queue.
+  const seriesJob = (async () => {
+    for (const g of seriesPlan) {
+      const furthest = g.list.slice().sort((a, b) => (b.series.position || 0) - (a.series.position || 0))[0];
+      try {
+        const next = await loadNextInSeries(furthest);
+        const c = next && { ...next, recKey: 'series:' + normTitle(next.title) };
+        if (c && ok(c)) seriesRecs.push({ ...c, why: `Next in ${furthest.series.name}. You gave the series ${fmtRating(Math.round(g.avg * 4) / 4)}★.` });
+      } catch (e) { /* skip */ }
+      tick();
+    }
+  })();
 
-  const authorRecs = [];
-  for (const a of loved) {
-    try {
-      const minYear = Math.min(...a.books.map(b => b.year || 9999)) - 8;
-      const ranked = await authorPicks(a.name, ok, busy, minYear < 9000 ? minYear : 0);
-      const found = [];
-      for (const c of ranked.slice(0, 5)) { if (found.length < 2 && !(await laterInSeries(c))) found.push(c); }
-      found.forEach(c => authorRecs.push({ ...c, score: a.score + appeal(c), why: `More from ${a.name}. You average ${fmtRating(Math.round(avgOf(a) * 4) / 4)}★ for their books.` }));
-    } catch (e) { /* Apple stayed busy: skip this author this time */ }
-    tick();
-  }
-
-  const kinRecs = [];
+  Enricher.paused = true;
+  try {
+  // "Because you loved" first: it's the most useful, so it's ready soonest.
   for (const k of kinPlan) {
     try {
       // New-to-her author: start where most readers start (for a series, that's nearly always book 1).
@@ -1217,12 +1318,21 @@ async function buildRecs(progress) {
     tick();
   }
 
-  const byScore = (a, b) => (b.score || 0) - (a.score || 0);
-  return [
-    { title: 'Because of what you loved', items: roundRobin(kinRecs.sort(byScore), c => c.seed).slice(0, 12) },
-    { title: 'Next in a series you’re enjoying', items: seriesRecs },
-    { title: 'More from authors you adore', items: authorRecs.sort(byScore).slice(0, 12) }
-  ];
+  for (const a of loved) {
+    try {
+      const minYear = Math.min(...a.books.map(b => b.year || 9999)) - 8;
+      const ranked = await authorPicks(a.name, ok, busy, minYear < 9000 ? minYear : 0);
+      const found = [];
+      for (const c of ranked.slice(0, 5)) { if (found.length < 2 && !(await laterInSeries(c))) found.push(c); }
+      found.forEach(c => authorRecs.push({ ...c, score: a.score + appeal(c), why: `More from ${a.name}. You average ${fmtRating(Math.round(avgOf(a) * 4) / 4)}★ for their books.` }));
+    } catch (e) { /* Apple stayed busy: skip this author this time */ }
+    tick();
+  }
+  } finally {
+    Enricher.paused = false;
+  }
+  await seriesJob;
+  return sections();
 }
 
 /** Interleave items by group, best first in each, so every group gets a turn near the top. */
@@ -1234,23 +1344,30 @@ function roundRobin(items, groupOf) {
   return out;
 }
 
-function drawRecs(sections) {
+function drawRecs(sections, stillLooking) {
   recList = [];
+  const open = new Set($$('#recs details.about[open]').map(d => d.dataset.key));
   const html = sections.filter(s => s.items.length).map(s => `
     <h3 class="section-title">${esc(s.title)}</h3>
     <div class="card-grid">${s.items.map(c => {
       const i = recList.push(c) - 1;
       return resultCard(c, i, 'recs', `<p class="why">${esc(c.why)}</p><button class="link small" data-action="dismiss-rec" data-key="${esc(c.recKey || c.olKey || '')}">not for me</button>`);
     }).join('')}</div>`).join('');
-  $('#recs').innerHTML = html || `<p class="muted">I couldn't find anything new. Try rating a few more books, or tap “Fresh picks”.</p>`;
+  $('#recs').innerHTML = (html || (stillLooking ? '' : `<p class="muted">I couldn't find anything new. Try rating a few more books, or tap “Fresh picks”.</p>`))
+    + (stillLooking ? loadingHTML(stillLooking) : '');
+  // Keep any blurbs she'd opened open while the list grows.
+  $$('#recs details.about').forEach(d => { if (open.has(d.dataset.key)) d.open = true; });
+  wireAbout($('#recs'));
 }
 
 function dismissRec(key) {
   Store.data.dismissed = [...new Set([...(Store.data.dismissed || []), key])];
   const c = Store.data.recCache;
-  if (c) c.sections.forEach(s => s.items = s.items.filter(i => (i.recKey || i.olKey) !== key));
+  const drop = sections => sections.forEach(s => s.items = s.items.filter(i => (i.recKey || i.olKey) !== key));
+  if (c) drop(c.sections);
   Store.save();
-  drawRecs(c ? c.sections : []);
+  if (RecBuild.running && RecBuild.partial) { drop(RecBuild.partial); drawRecs(RecBuild.partial, RecBuild.status || 'Still looking…'); }
+  else drawRecs(c ? c.sections : []);
 }
 
 /* ------------------------------------------------------------ settings */

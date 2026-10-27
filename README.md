@@ -16,6 +16,7 @@ A personal book tracker dressed as an independent bookshop: an oxblood-and-gold 
   - *Next in a series you're enjoying*;
   - *More from authors you adore*, most-read first.
   Authors you didn't vibe with are never used. Covers and genres come from Apple Books; Open Library fills gaps.
+  Picks appear as they're found (the *Because you loved…* ones first), are quietly prepared a few seconds after the app opens, and author look-ups are remembered for two weeks, so *Fresh picks* is quick after the first time. Every pick has **About this book** (the blurb) and links to Goodreads, Amazon and Apple Books; **Already read** adds it to your library so it's never suggested again.
 
 ## Covers
 
